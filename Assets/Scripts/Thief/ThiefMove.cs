@@ -2,17 +2,26 @@ using UnityEngine;
 
 public class ThiefMove : MonoBehaviour
 {
-    public float rotSpeed = 540f;
+    public float rotationSpeed = 540f;
     public float moveSpeed = 5f;
-    public float grav = -20f;
-
-    private bool girando = false;
+    public float gravitySpeed = -20f;
 
     private CharacterController controller;
     private Animator animator;
 
-    private float velY;
-    private Quaternion rotObjetivo;
+    private float fallSpeed;
+    private Quaternion rotationObjetivo;
+
+    // Estados del personaje
+    private enum Estado
+    {
+        Idle, // Sin movimiento
+        Running, // Corriendo
+        Turning // Girando 
+    }
+
+    // Estado actual del personaje
+    private Estado estadoActual = Estado.Idle; 
 
     void Start()
     {
@@ -22,74 +31,111 @@ public class ThiefMove : MonoBehaviour
 
     void Update()
     {
-        float x = Input.GetAxisRaw("Horizontal");
-        float z = Input.GetAxisRaw("Vertical");
+        float x = Input.GetAxisRaw("Horizontal"); // Entrada horizontal para rotación (A/D)
+        float z = Input.GetAxisRaw("Vertical"); // Entrada vertical para movimiento (W/S)
 
-        bool corriendo = (!girando && z > 0f); // solo si vas hacia delante
+        GestionarTransiciones(z); 
+        ProcesarEstado(x);
+    }
 
-        // -------------------------
-        // GIRO 180 SI VAS HACIA ATRÁS
-        // -------------------------
-        if (!girando && z < 0f)
-        {
-            girando = true;
-            rotObjetivo = Quaternion.Euler(0f, transform.eulerAngles.y + 180f, 0f);
-        }
-
-        if (girando)
-        {
-            transform.rotation = Quaternion.RotateTowards(
-                transform.rotation,
-                rotObjetivo,
-                rotSpeed * Time.deltaTime
-            );
-
-            float falta = Quaternion.Angle(transform.rotation, rotObjetivo);
-            if (falta < 0.5f)
-            {
-                girando = false;
-            }
-
-            animator.SetBool("isRunning", false);
-            SoloGravedad();
+    // Transiciones de estado
+    void GestionarTransiciones(float z)
+    {
+        if (estadoActual == Estado.Turning)
             return;
-        }
 
-        // Animación (Idle/Run)
-        animator.SetBool("isRunning", corriendo);
-
-        // -------------------------
-        // MOVIMIENTO NORMAL
-        // -------------------------
-        float adelante = corriendo ? 1f : 0f;
-
-        // girar con A/D aunque no avances
-        transform.Rotate(0f, x * rotSpeed * 0.35f * Time.deltaTime, 0f);
-
-        // gravedad
-        if (controller.isGrounded && velY < 0f)
+        if (z < 0f)
         {
-            velY = -5f;
+            IniciarGiro();
         }
 
-        velY += grav * Time.deltaTime;
+        else if (z > 0f)
+        {
+            estadoActual = Estado.Running;
+        }
 
-        Vector3 dir = transform.forward * (adelante * moveSpeed);
-        dir.y = velY;
+        else
+        {
+            estadoActual = Estado.Idle;
+        }
+    }
 
+    // Procesar estado actual 
+    void ProcesarEstado(float x)
+    {
+        switch (estadoActual)
+        {
+            case Estado.Idle: // Sin movimiento no corremos, solo rotamos y aplicamos gravedad
+                animator.SetBool("isRunning", false);
+                transform.Rotate(0f, x * rotationSpeed * 0.35f * Time.deltaTime, 0f);
+                AplicarGravedad();
+                Caída();
+                break;
+
+            case Estado.Running: // Corriendo, rotamos y avanzamos
+                animator.SetBool("isRunning", true);
+                transform.Rotate(0f, x * rotationSpeed * 0.35f * Time.deltaTime, 0f);
+                AplicarGravedad();
+                MoverAdelante();
+                break;
+
+            case Estado.Turning: // Girando, procesamos el giro y aplicamos gravedad
+                ProcesarGiro();
+                break;
+        }
+    }
+
+    // Giro 180º
+    void IniciarGiro()
+    {
+        estadoActual = Estado.Turning;
+        rotationObjetivo = Quaternion.Euler(0f, transform.eulerAngles.y + 180f, 0f);
+    }
+ 
+    // Procesar el giro hacia la rotación objetivo
+    void ProcesarGiro()
+    {
+        transform.rotation = Quaternion.RotateTowards(
+            transform.rotation,
+            rotationObjetivo,
+            rotationSpeed * Time.deltaTime
+        );
+
+        float falta = Quaternion.Angle(transform.rotation, rotationObjetivo);
+
+        if (falta < 0.5f)
+        {
+            estadoActual = Estado.Idle;
+        }
+
+        animator.SetBool("isRunning", false);
+        AplicarGravedad();
+        Caída();
+    }
+
+    // Movimiento hacia adelante
+    void MoverAdelante()
+    {
+        Vector3 dir = transform.forward * moveSpeed;
+        dir.y = fallSpeed;
         controller.Move(dir * Time.deltaTime);
     }
 
-    void SoloGravedad()
+    // Caída vertical por gravedad
+    void Caída()
     {
-        if (controller.isGrounded && velY < 0f)
+        Vector3 caida = new Vector3(0f, fallSpeed, 0f);
+        controller.Move(caida * Time.deltaTime);
+    }
+
+    // Gravedad
+    void AplicarGravedad()
+    {
+        if (controller.isGrounded && fallSpeed < 0f)
         {
-            velY = -5f;
+            fallSpeed = -5f;
         }
 
-        velY += grav * Time.deltaTime;
-
-        Vector3 caida = new Vector3(0f, velY, 0f);
-        controller.Move(caida * Time.deltaTime);
+        fallSpeed += gravitySpeed * Time.deltaTime;
     }
 }
