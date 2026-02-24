@@ -25,6 +25,9 @@ public class AgentMove : MonoBehaviour
     public float ventanaHitbox = 0.15f;        // Tiempo activo del collider del arma
     public float cooldownAtaque = 1.5f;        // Tiempo antes de poder volver a atacar
 
+    public float anguloVigilancia = 90f;   // Cuánto gira hacia cada lado (90 a cada lado = 180 en total)
+    private float anguloGiroActual = 0f;   // Rastrear por dónde va mirando
+    private float direccionGiro = 1f;      // 1 para girar a la derecha, -1 para la izquierda
  
     public SwordHitbox swordHitbox;            // Script del arma que detecta impacto
 
@@ -95,8 +98,24 @@ public class AgentMove : MonoBehaviour
         agente.isStopped = true;               // No se mueve
         animator.SetBool("isRunning", false);  // Animación idle
 
-        // Gira lentamente como si vigilara
-        transform.Rotate(0f, velocidadRotacionIdle * Time.deltaTime, 0f);
+        // Calculamos cuánto va a girar en este frame exacto
+        float rotacionFrame = velocidadRotacionIdle * Time.deltaTime * direccionGiro;
+        
+        // Aplicamos la rotación al modelo del guardia
+        transform.Rotate(0f, rotacionFrame, 0f);
+        
+        // Sumamos (o restamos) el giro al total que estamos rastreando
+        anguloGiroActual += rotacionFrame;
+
+        // Si llega al tope derecho (ej: 90) o izquierdo (-90), invertimos la dirección
+        if (anguloGiroActual >= anguloVigilancia)
+        {
+            direccionGiro = -1f; // Empieza a girar a la izquierda
+        }
+        else if (anguloGiroActual <= -anguloVigilancia)
+        {
+            direccionGiro = 1f;  // Empieza a girar a la derecha
+        }
 
         // Si ve al jugador empieza persecución
         if (PuedeVerLadron())
@@ -154,6 +173,8 @@ public class AgentMove : MonoBehaviour
             agente.remainingDistance <= agente.stoppingDistance)
         {
             transform.rotation = puestoInicialRot;
+            anguloGiroActual = 0f;  // Reseteamos su memoria de giro
+            direccionGiro = 1f;     // Hacemos que la próxima vez empiece hacia la derecha
             estadoActual = Estado.Quieto;
         }
     }
