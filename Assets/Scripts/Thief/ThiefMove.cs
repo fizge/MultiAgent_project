@@ -13,14 +13,7 @@ public class ThiefMove : MonoBehaviour
     private Quaternion rotationObjetivo;
 
     // Estados del personaje
-    private enum Estado
-    {
-        Idle, // Sin movimiento
-        Running, // Corriendo
-        Turning // Girando 
-    }
-
-    // Estado actual del personaje
+    private enum Estado{ Idle, Running, Turning }
     private Estado estadoActual = Estado.Idle; 
 
     void Start()

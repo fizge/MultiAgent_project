@@ -9,22 +9,21 @@ public class AgentMove : MonoBehaviour
     public Transform ladron; // Transform del protagonista (a quién persigue)
 
 
-    public float viewDistance = 0.1f;           // Distancia máxima a la que puede ver
+    public float viewDistance = 12f;           // Distancia máxima a la que puede ver
 
     public float viewAngle = 180f;             // Ángulo del cono de visión
     public Transform eyePoint;                 // Punto de los ojos
-    public float eyeHeight = 1.6f;             // Altura si no usamos eyePoint
     public LayerMask obstacleMask;             // Capas que bloquean la visión (paredes)
     public LayerMask targetMask;               // Capa del jugador
 
 
-    public float distanciaAtaque = 0.002f;       // Distancia mínima para empezar a atacar
+    public float distanciaAtaque = 1.5f;       // Distancia mínima para empezar a atacar
     public float velocidadRotacionIdle = 30f;  // Velocidad de giro cuando está vigilando
 
-    public float idleAntesAtaque = 0.05f;      // Pequeña pausa antes de atacar
-    public float delayActivarHitbox = 0.12f;   // Tiempo hasta que el golpe "sale"
+    public float idleAntesAtaque = 0.2f;      // Pequeña pausa antes de atacar
+    public float delayActivarHitbox = 0.3f;   // Tiempo hasta que el golpe "sale"
     public float ventanaHitbox = 0.15f;        // Tiempo activo del collider del arma
-    public float cooldownAtaque = 0.3f;        // Tiempo antes de poder volver a atacar
+    public float cooldownAtaque = 1.5f;        // Tiempo antes de poder volver a atacar
 
  
     public SwordHitbox swordHitbox;            // Script del arma que detecta impacto
@@ -219,11 +218,9 @@ public class AgentMove : MonoBehaviour
     {
         if (!ladron) return false;
 
-        Vector3 origin = eyePoint != null
-            ? eyePoint.position
-            : transform.position + Vector3.up * eyeHeight;
-
+        Vector3 origin = eyePoint.position;
         Vector3 toTarget = ladron.position - origin;
+        toTarget.y += 0.2f; // Ajuste para apuntar al torso
 
         if (toTarget.magnitude > viewDistance)
             return false;
