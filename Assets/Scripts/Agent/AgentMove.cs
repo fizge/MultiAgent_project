@@ -1,136 +1,256 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.AI;
+using UnityEngine.SceneManagement;
 
 public class AgentMove : MonoBehaviour
 {
-    public Transform ladron; // El protagonista (ladrón)
-    public float rangoVision = 10f; // Rango de visión
-    public float rangoAtaque = 1.5f; // Rango de ataque
-    public float velocidadRotacion = 30f; // Velocidad de rotación
 
+    public Transform ladron; // Transform del protagonista (a quién persigue)
+
+
+    public float viewDistance = 0.1f;           // Distancia máxima a la que puede ver
+
+    public float viewAngle = 180f;             // Ángulo del cono de visión
+    public Transform eyePoint;                 // Punto de los ojos
+    public float eyeHeight = 1.6f;             // Altura si no usamos eyePoint
+    public LayerMask obstacleMask;             // Capas que bloquean la visión (paredes)
+    public LayerMask targetMask;               // Capa del jugador
+
+
+    public float distanciaAtaque = 0.002f;       // Distancia mínima para empezar a atacar
+    public float velocidadRotacionIdle = 30f;  // Velocidad de giro cuando está vigilando
+
+    public float idleAntesAtaque = 0.05f;      // Pequeña pausa antes de atacar
+    public float delayActivarHitbox = 0.12f;   // Tiempo hasta que el golpe "sale"
+    public float ventanaHitbox = 0.15f;        // Tiempo activo del collider del arma
+    public float cooldownAtaque = 0.3f;        // Tiempo antes de poder volver a atacar
+
+ 
+    public SwordHitbox swordHitbox;            // Script del arma que detecta impacto
+
+    // Componentes internos
     private NavMeshAgent agente;
     private Animator animator;
-    private Vector3 posicionInicial; // Posición inicial para volver cuando el ladrón se aleje
-    private bool yaAtacando = false; // Para evitar que el agente ataque varias veces
 
-    private enum Estado
-    {
-        Quieto,         // Estado cuando el agente está parado
-        Persiguiendo,   // Estado cuando el agente persigue
-        Atacando        // Estado cuando el agente está atacando
-    }
+    // Posición inicial para volver cuando pierde al jugador
+    private Vector3 puestoInicialPos;
+    private Quaternion puestoInicialRot;
 
+    // Control de ataque
+    private bool atacando;
+    private Coroutine rutinaDeAtaque;
+
+    // Estados posibles del guardia
+    private enum Estado { Quieto, Persiguiendo, Volviendo, Atacando }
     private Estado estadoActual;
 
     void Start()
     {
+        // Obtener componentes
         agente = GetComponent<NavMeshAgent>();
         animator = GetComponent<Animator>();
-        posicionInicial = transform.position;
-        estadoActual = Estado.Quieto; // Empieza quieto
+
+        // Guardamos la posición inicial
+        puestoInicialPos = transform.position;
+        puestoInicialRot = transform.rotation;
+
+        // El agente se detendrá a esta distancia del objetivo
+        agente.stoppingDistance = distanciaAtaque;
+
+        estadoActual = Estado.Quieto;
+
+        // Asignamos este script como dueño del arma
+        if (swordHitbox != null)
+            swordHitbox.SetOwner(this);
     }
 
     void Update()
     {
-        // Cambiar el estado basado en el rango de visión y la distancia al protagonista
+        // Máquina de estados principal
         switch (estadoActual)
         {
             case Estado.Quieto:
-                Vigilando();
+                Quieto();
                 break;
 
             case Estado.Persiguiendo:
                 Persiguiendo();
                 break;
 
+            case Estado.Volviendo:
+                Volviendo();
+                break;
+
             case Estado.Atacando:
-                Atacando();
+                // El ataque se controla mediante coroutine
                 break;
         }
     }
 
-    // -----------------------------
-    // Vigilando, el agente está quieto
-    // -----------------------------
-    void Vigilando()
+ 
+    // ESTADO: QUIETO
+
+    void Quieto()
     {
-        agente.isStopped = true; // El agente no se mueve mientras está quieto
+        agente.isStopped = true;               // No se mueve
+        animator.SetBool("isRunning", false);  // Animación idle
 
-        // Rotar el agente para simular vigilancia (puedes personalizarlo)
-        transform.Rotate(0f, velocidadRotacion * Time.deltaTime, 0f);
+        // Gira lentamente como si vigilara
+        transform.Rotate(0f, velocidadRotacionIdle * Time.deltaTime, 0f);
 
-        if (PuedeVerLadron()) // Si ve al ladrón, comienza a perseguir
+        // Si ve al jugador empieza persecución
+        if (PuedeVerLadron())
         {
             estadoActual = Estado.Persiguiendo;
-            agente.isStopped = false; // Permite que el agente se mueva
+            agente.isStopped = false;
         }
     }
 
-    // -----------------------------
-    // Persiguiendo, el agente sigue al ladrón
-    // -----------------------------
+    
+    // ESTADO: PERSIGUIENDO
+    
     void Persiguiendo()
     {
-        if (!PuedeVerLadron()) // Si el ladrón se va fuera de la visión, vuelve al estado Quieto
+        // Si deja de verlo, vuelve a su puesto
+        if (!PuedeVerLadron())
         {
-            estadoActual = Estado.Quieto;
+            estadoActual = Estado.Volviendo;
+            agente.SetDestination(puestoInicialPos);
+            animator.SetBool("isRunning", true);
             return;
         }
 
-        // Si el agente está lo suficientemente cerca, comienza a atacar
-        if (Vector3.Distance(transform.position, ladron.position) <= rangoAtaque)
+        // Sigue al jugador
+        agente.SetDestination(ladron.position);
+        animator.SetBool("isRunning", true);
+
+        // Si está lo suficientemente cerca y no está atacando
+        if (!agente.pathPending &&
+            agente.remainingDistance <= agente.stoppingDistance &&
+            !atacando)
         {
             estadoActual = Estado.Atacando;
+            rutinaDeAtaque = StartCoroutine(RutinaAtaque());
+        }
+    }
+
+  
+    // ESTADO: VOLVIENDO AL PUESTO
+
+    void Volviendo()
+    {
+        // Si vuelve a verlo, persigue otra vez
+        if (PuedeVerLadron())
+        {
+            estadoActual = Estado.Persiguiendo;
             return;
         }
 
-        // Mover hacia la posición del ladrón
-        agente.SetDestination(ladron.position);
-        animator.SetBool("isRunning", true); // Activamos la animación de correr
+        agente.SetDestination(puestoInicialPos);
+        animator.SetBool("isRunning", true);
+
+        // Cuando llega, vuelve a estar quieto
+        if (!agente.pathPending &&
+            agente.remainingDistance <= agente.stoppingDistance)
+        {
+            transform.rotation = puestoInicialRot;
+            estadoActual = Estado.Quieto;
+        }
     }
 
-    // -----------------------------
-    // Atacando, el agente se detiene para atacar
-    // -----------------------------
-    void Atacando()
+    // RUTINA DE ATAQUE
+    
+    IEnumerator RutinaAtaque()
     {
-        if (yaAtacando) return;
+        atacando = true;
 
-        yaAtacando = true;
-        agente.isStopped = true; // El agente se detiene al atacar
+        agente.isStopped = true;               // Se detiene
+        animator.SetBool("isRunning", false);  // Idle antes del golpe
 
-        // Mirar al ladrón
-        Vector3 direccion = (ladron.position - transform.position).normalized;
-        direccion.y = 0; // Mantener el personaje en el plano 2D
-        transform.rotation = Quaternion.LookRotation(direccion);
+        MirarAlLadron();
 
-        // Lanzar la animación de ataque
+        yield return new WaitForSeconds(idleAntesAtaque);
+
+        // Lanzar animación de ataque
         animator.SetTrigger("Attack");
-        animator.SetBool("isAttacking", true); // Iniciar la animación de ataque
+
+        yield return new WaitForSeconds(delayActivarHitbox);
+
+        // Activar hitbox del arma
+        if (swordHitbox != null)
+        {
+            swordHitbox.EnableHitbox(true);
+            yield return new WaitForSeconds(ventanaHitbox);
+            swordHitbox.EnableHitbox(false);
+        }
+
+        yield return new WaitForSeconds(cooldownAtaque);
+
+        atacando = false;
+        rutinaDeAtaque = null;
+        agente.isStopped = false;
+
+        // Decide qué hacer después del ataque
+        if (PuedeVerLadron())
+            estadoActual = Estado.Persiguiendo;
+        else
+            estadoActual = Estado.Volviendo;
     }
 
-    // -----------------------------
-    // Verificación de si el agente puede ver al ladrón
-    // -----------------------------
+  
+    // MIRAR AL JUGADOR
+
+    void MirarAlLadron()
+    {
+        if (!ladron) return;
+
+        Vector3 dir = ladron.position - transform.position;
+        dir.y = 0f; // Mantener rotación horizontal
+
+        if (dir.sqrMagnitude > 0.001f)
+            transform.rotation = Quaternion.LookRotation(dir.normalized);
+    }
+
+   
+    // SISTEMA DE VISIÓN 
+    
     bool PuedeVerLadron()
     {
-        float distancia = Vector3.Distance(transform.position, ladron.position);
+        if (!ladron) return false;
 
-        // El agente puede ver al ladrón solo si está dentro del rango de visión
-        if (distancia > rangoVision)
+        Vector3 origin = eyePoint != null
+            ? eyePoint.position
+            : transform.position + Vector3.up * eyeHeight;
+
+        Vector3 toTarget = ladron.position - origin;
+
+        if (toTarget.magnitude > viewDistance)
             return false;
 
-        return true;
+        float ang = Vector3.Angle(transform.forward, toTarget);
+        if (ang > viewAngle * 0.5f)
+            return false;
+
+        int mask = obstacleMask | targetMask;
+
+        if (Physics.Raycast(origin, toTarget.normalized,
+            out RaycastHit hit,
+            viewDistance,
+            mask,
+            QueryTriggerInteraction.Ignore))
+        {
+            return hit.transform == ladron;
+        }
+
+        return false;
     }
 
-    // -----------------------------
-    // Reseteo después de un ataque
-    // -----------------------------
-    public void FinAtaque()
-    {
-        // El ataque ha terminado, desactivar isAttacking
-        animator.SetBool("isAttacking", false);
-        yaAtacando = false;
-        estadoActual = Estado.Quieto; // Vuelve a estar quieto después del ataque
+
+    // CUANDO LA ESPADA TOCA AL JUGADOR
+    
+    public void OnSwordHitLadron()
+    {     
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 }
