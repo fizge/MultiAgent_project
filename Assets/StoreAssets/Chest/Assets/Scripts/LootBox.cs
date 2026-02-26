@@ -157,6 +157,8 @@ public class LootBox : MonoBehaviour
         // calls the OnBoxOpen event and deliver the
         // earned GameObjects on temp list
         OnBoxOpen?.Invoke(loots.ToArray());
+
+        GameManager.Instance.PlayerLooted();
     }
 
     /// <summary>
@@ -188,19 +190,14 @@ public class LootBox : MonoBehaviour
     /// When something hits our treasure box.
     /// </summary>
     /// <param name="collision">Collision.</param>
-    private void OnCollisionEnter(Collision collision)
+    private void OnTriggerEnter(Collider other)
     {
-        // OnCollisionMethod is not for OpenOnTouch method
-        if (openingMethod == OpeningMethods.OpenOnTouch) return;
-
-        // check if the hitting object is our player
-        if (collision.gameObject.tag == playerTag)
+        if (other.CompareTag(playerTag))
         {
-            // if the method is OpenOnKeyPress, let's just flag the player as close
-            if (openingMethod == OpeningMethods.OpenOnKeyPress) isPlayerAround = true;
-
-            // otherwise, open the box.
-            else Open();
+            if (openingMethod == OpeningMethods.OpenOnKeyPress)
+                isPlayerAround = true;
+            else
+                Open();
         }
     }
 
@@ -208,12 +205,14 @@ public class LootBox : MonoBehaviour
     /// When player goes away from box.
     /// </summary>
     /// <param name="collision">Collision.</param>
-    private void OnCollisionExit(Collision collision)
+    private void OnTriggerExit(Collider other)
     {
-        // flag the player as away.
-        isPlayerAround = false;
+        if (other.CompareTag(playerTag))
+        {
+            isPlayerAround = false;
 
-        // if the box is suppose to close on exit, close it
-        if (closeOnExit) Close();
+            if (closeOnExit)
+                Close();
+        }
     }
 }
