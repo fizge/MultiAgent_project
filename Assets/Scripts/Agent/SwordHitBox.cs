@@ -6,7 +6,7 @@ public class SwordHitbox : MonoBehaviour
     public Collider hitboxCollider;   // el collider del arma
     public string ladronTag = "Ladron";
 
-    private AgentMove owner;
+    private GuardianAgentMove owner;
     private bool enabledHit;
     private bool alreadyHit;          // evita múltiples impactos en el mismo swing
 
@@ -18,7 +18,7 @@ public class SwordHitbox : MonoBehaviour
         EnableHitbox(false);
     }
 
-    public void SetOwner(AgentMove agent)
+    public void SetOwner(GuardianAgentMove agent)
     {
         owner = agent;
     }
