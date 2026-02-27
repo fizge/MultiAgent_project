@@ -3,7 +3,7 @@ using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.SceneManagement;
 
-public class GuardianAgentMove : MonoBehaviour
+public class GuardianAgentMove : MonoBehaviour, IDamageable
 {
 
     public Transform ladron; // Transform del protagonista (a quién persigue)

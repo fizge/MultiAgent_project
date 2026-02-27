@@ -3,7 +3,7 @@ using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.SceneManagement;
 
-public class PatrolAgentMove : MonoBehaviour
+public class PatrolAgentMove : MonoBehaviour, IDamageable
 {
     [Header("Target")]
     public Transform ladron;
@@ -50,8 +50,8 @@ public class PatrolAgentMove : MonoBehaviour
 
         estadoActual = Estado.Patrullando;
 
-        //if (swordHitbox != null)
-            ///swordHitbox.SetOwner(this);
+        if (swordHitbox != null)
+            swordHitbox.SetOwner(this);
 
         GenerarNuevoDestino();
         animator.SetBool("isRunning", false);

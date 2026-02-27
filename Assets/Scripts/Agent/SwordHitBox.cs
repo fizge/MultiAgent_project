@@ -6,7 +6,7 @@ public class SwordHitbox : MonoBehaviour
     public Collider hitboxCollider;   // el collider del arma
     public string ladronTag = "Ladron";
 
-    private GuardianAgentMove owner;
+    private IDamageable owner;
     private bool enabledHit;
     private bool alreadyHit;          // evita múltiples impactos en el mismo swing
 
@@ -18,7 +18,7 @@ public class SwordHitbox : MonoBehaviour
         EnableHitbox(false);
     }
 
-    public void SetOwner(GuardianAgentMove agent)
+    public void SetOwner(IDamageable agent)
     {
         owner = agent;
     }
@@ -38,6 +38,7 @@ public class SwordHitbox : MonoBehaviour
 
         if (other.CompareTag(ladronTag))
         {
+            Debug.Log("Owner es: " + owner);
             alreadyHit = true;
             owner?.OnSwordHitLadron();
         }
