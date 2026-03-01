@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.AI;
 
+// Proporciona información sobre el estado físico y la posición del agente 
 public class MovementSensor : MonoBehaviour
 {
     private NavMeshAgent agente;
@@ -10,20 +11,21 @@ public class MovementSensor : MonoBehaviour
         agente = GetComponent<NavMeshAgent>();
     }
 
-    // Para la patrulla (usa la ruta del NavMesh)
+    // Verifica si el agente ha completado su ruta de navegación (usado en patrulla).
     public bool HaLlegadoAlDestino()
     {
         return !agente.pathPending && agente.remainingDistance <= 0.3f;
     }
 
-    // NUEVA FUNCIÓN: Comprueba la distancia real en el mundo 3D
-    // Evita que ataque desde lejos si el NavMesh aún no ha calculado la ruta
+    // Comprueba la distancia física real contra un objetivo para validar el rango de ataque.
     public bool EstaARangoFisico(Vector3 posicionObjetivo, float rango)
     {
+        // Optimizado usando magnitud al cuadrado para evitar el coste del cálculo de raíz cuadrada.
         float distanciaSqr = (transform.position - posicionObjetivo).sqrMagnitude;
         return distanciaSqr <= (rango * rango);
     }
 
+    // Devuelve las coordenadas actuales del cuerpo en el mundo.
     public Vector3 ObtenerPosicionActual()
     {
         return transform.position;

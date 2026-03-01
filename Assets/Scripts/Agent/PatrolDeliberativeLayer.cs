@@ -1,12 +1,10 @@
 using UnityEngine;
 
+// Implementa la planificación estratégica de rutas para la vigilancia (Planning Layer).
 public class PatrolDeliberativeLayer : DeliberativeLayer
 {
-    [Header("Movimiento")]
     public float velocidadCaminar = 2f;
     public float aceleracionCaminar = 2f;
-
-    [Header("Cálculo de Patrulla")]
     public int direccionesEscaneo = 16;
     public float distanciaMaxEscaneo = 50f;
     public float margenPared = 1.5f;
@@ -18,16 +16,20 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
 
     void Awake()
     {
+        // Obtiene referencias a los sensores del agente.
         sensorVision = GetComponent<VisionSensor>();
         sensorMovimiento = GetComponent<MovementSensor>();
     }
 
+    // Elabora y envía el plan de patrulla al árbitro central.
     public override ActionProposal GenerarPropuesta()
     {
         ActionProposal prop = new ActionProposal();
-        prop.solicitaControl = true;
+        prop.solicitaControl = true; // Desea ejecutar la patrulla si no hay emergencias.
 
         if (!rutaCalculada) { PlanificarNuevaRuta(); rutaCalculada = true; }
+        
+        // Si el sensor detecta que llegamos al destino, cambiamos de sentido.
         if (sensorMovimiento.HaLlegadoAlDestino()) CambiarDestinoDePatrulla();
 
         prop.destinoMovimiento = destinoActual;
@@ -35,9 +37,11 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         prop.aceleracion = aceleracionCaminar;
         prop.distanciaParada = 0f;
         prop.corriendo = false;
+        
         return prop;
     }
 
+    // Analiza el entorno mediante rayos para encontrar el camino más despejado.
     void PlanificarNuevaRuta()
     {
         puntoA = transform.position;
@@ -64,5 +68,6 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         destinoActual = puntoB;
     }
 
+    // Alterna el objetivo entre el punto de origen (A) y el punto explorado (B).
     void CambiarDestinoDePatrulla() => destinoActual = (Vector3.SqrMagnitude(destinoActual - puntoA) < 0.1f) ? puntoB : puntoA;
 }
