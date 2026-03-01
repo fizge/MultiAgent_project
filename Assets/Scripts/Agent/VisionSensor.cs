@@ -3,17 +3,18 @@ using UnityEngine.AI;
 
 public class VisionSensor : MonoBehaviour
 {
-    public Transform ladron;
-    
+    // Encapsulado: El cerebro ya no puede acceder al objeto físico del ladrón
+    [SerializeField] private Transform ladron; 
+
     [Header("Configuración Visual")]
-    public float viewDistance = 5f;
-    public float viewAngle = 250f;
+    public float viewDistance = 12f;
+    public float viewAngle = 180f;
     public Transform eyePoint;
     public LayerMask obstacleMask;
     public LayerMask targetMask;
     
     [Tooltip("Suma esta altura para apuntar al pecho en lugar de a los pies")]
-    
+    public float alturaTorso = 0.2f;
 
     public bool PuedeVerLadron()
     {
@@ -21,7 +22,7 @@ public class VisionSensor : MonoBehaviour
 
         Vector3 origin = eyePoint.position;
         Vector3 targetPos = ladron.position;
-        targetPos.y += 0.2f; // Ahora usa la variable del Inspector
+        targetPos.y += alturaTorso;
 
         Vector3 toTarget = targetPos - origin;
 
@@ -53,5 +54,12 @@ public class VisionSensor : MonoBehaviour
         }
 
         return distanciaMax;
+    }
+
+    // NUEVO SENSOR: Devuelve las coordenadas, pero oculta el objeto real
+    public Vector3 ObtenerPosicionObjetivo()
+    {
+        if (ladron != null) return ladron.position;
+        return Vector3.zero;
     }
 }

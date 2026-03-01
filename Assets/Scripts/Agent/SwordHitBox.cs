@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.SceneManagement; // Necesario para recargar la escena
 
 public class SwordHitbox : MonoBehaviour
 {
@@ -6,7 +7,6 @@ public class SwordHitbox : MonoBehaviour
     public Collider hitboxCollider;   // el collider del arma
     public string ladronTag = "Ladron";
 
-    private IDamageable owner;
     private bool enabledHit;
     private bool alreadyHit;          // evita múltiples impactos en el mismo swing
 
@@ -16,11 +16,6 @@ public class SwordHitbox : MonoBehaviour
             hitboxCollider = GetComponent<Collider>();
 
         EnableHitbox(false);
-    }
-
-    public void SetOwner(IDamageable agent)
-    {
-        owner = agent;
     }
 
     public void EnableHitbox(bool enable)
@@ -38,9 +33,11 @@ public class SwordHitbox : MonoBehaviour
 
         if (other.CompareTag(ladronTag))
         {
-            Debug.Log("Owner es: " + owner);
+            Debug.Log("¡El jugador ha sido alcanzado por la espada!");
             alreadyHit = true;
-            owner?.OnSwordHitLadron();
+            
+            // Reiniciamos la escena directamente desde aquí
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
     }
 }

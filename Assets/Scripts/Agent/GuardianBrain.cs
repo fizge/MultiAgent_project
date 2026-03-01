@@ -1,7 +1,7 @@
 using UnityEngine;
 
-[RequireComponent(typeof(VisionSensor), typeof(AgentActuator))]
-public class GuardianBrain : MonoBehaviour, IDamageable
+[RequireComponent(typeof(VisionSensor), typeof(MovementSensor), typeof(AgentActuator))]
+public class GuardianBrain : MonoBehaviour
 {
     [Header("Vigilancia")]
     public float velocidadRotacionIdle = 30f;
@@ -12,7 +12,8 @@ public class GuardianBrain : MonoBehaviour, IDamageable
     public float aceleracionCorrer = 8f;
     public float distanciaAtaque = 1.5f;
 
-    private VisionSensor sensor;
+    private VisionSensor sensorVision;
+    private MovementSensor sensorMovimiento;
     private AgentActuator actuador;
 
     private float anguloGiroActual = 0f;
@@ -23,11 +24,9 @@ public class GuardianBrain : MonoBehaviour, IDamageable
 
     void Start()
     {
-        sensor = GetComponent<VisionSensor>();
+        sensorVision = GetComponent<VisionSensor>();
+        sensorMovimiento = GetComponent<MovementSensor>();
         actuador = GetComponent<AgentActuator>();
-
-        if (actuador.swordHitbox != null)
-            actuador.swordHitbox.SetOwner(this);
 
         estadoActual = Estado.Quieto;
     }
@@ -50,21 +49,18 @@ public class GuardianBrain : MonoBehaviour, IDamageable
 
     void DeliberarVigilancia()
     {
-        actuador.Detener(); // Músculos quietos
+        actuador.Detener();
 
-        // Pensamos cuánto hay que girar y ordenamos al músculo rotar
         float rotacionFrame = velocidadRotacionIdle * Time.deltaTime * direccionGiro;
         actuador.Rotar(rotacionFrame);
         anguloGiroActual += rotacionFrame;
 
-        // Si llegamos al límite visual, cambiamos de sentido
         if (anguloGiroActual >= anguloVigilancia)
             direccionGiro = -1f;
         else if (anguloGiroActual <= -anguloVigilancia)
             direccionGiro = 1f;
 
-        // Si ve al ladrón, cambia de plan
-        if (sensor.PuedeVerLadron())
+        if (sensorVision.PuedeVerLadron())
         {
             estadoActual = Estado.Persiguiendo;
         }
@@ -72,20 +68,21 @@ public class GuardianBrain : MonoBehaviour, IDamageable
 
     void DeliberarPersecucion()
     {
-        if (!sensor.PuedeVerLadron())
+        if (!sensorVision.PuedeVerLadron())
         {
             estadoActual = Estado.Quieto;
-            anguloGiroActual = 0f; // Reseteamos el cuello
+            anguloGiroActual = 0f;
             direccionGiro = 1f;
             return;
         }
 
-        actuador.MoverA(sensor.ladron.position, velocidadCorrer, aceleracionCorrer, distanciaAtaque, true);
+        Vector3 posicionEnemigo = sensorVision.ObtenerPosicionObjetivo();
+        actuador.MoverA(posicionEnemigo, velocidadCorrer, aceleracionCorrer, distanciaAtaque, true);
 
-        if (actuador.EstaCercaDelObjetivo(distanciaAtaque) && !actuador.EstaAtacando)
+        if (sensorMovimiento.EstaCercaDelObjetivo(distanciaAtaque) && !actuador.EstaAtacando)
         {
             estadoActual = Estado.Atacando;
-            actuador.IniciarAtaque(sensor.ladron);
+            actuador.IniciarAtaque(posicionEnemigo);
         }
     }
 
@@ -93,7 +90,7 @@ public class GuardianBrain : MonoBehaviour, IDamageable
     {
         if (!actuador.EstaAtacando)
         {
-            if (sensor.PuedeVerLadron())
+            if (sensorVision.PuedeVerLadron())
                 estadoActual = Estado.Persiguiendo;
             else
             {
@@ -102,10 +99,5 @@ public class GuardianBrain : MonoBehaviour, IDamageable
                 direccionGiro = 1f;
             }
         }
-    }
-
-    public void OnSwordHitLadron()
-    {
-        UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
     }
 }

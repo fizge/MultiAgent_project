@@ -1,7 +1,7 @@
 using UnityEngine;
 
-[RequireComponent(typeof(VisionSensor), typeof(AgentActuator))]
-public class PatrolBrain : MonoBehaviour, IDamageable
+[RequireComponent(typeof(VisionSensor), typeof(MovementSensor), typeof(AgentActuator))]
+public class PatrolBrain : MonoBehaviour
 {
     [Header("Movimiento")]
     public float velocidadCaminar = 2f;
@@ -15,7 +15,8 @@ public class PatrolBrain : MonoBehaviour, IDamageable
     public float distanciaMaxEscaneo = 50f;
     public float margenPared = 1.5f;
 
-    private VisionSensor sensor;
+    private VisionSensor sensorVision;
+    private MovementSensor sensorMovimiento;
     private AgentActuator actuador;
 
     private Vector3 puntoA;
@@ -27,11 +28,9 @@ public class PatrolBrain : MonoBehaviour, IDamageable
 
     void Start()
     {
-        sensor = GetComponent<VisionSensor>();
+        sensorVision = GetComponent<VisionSensor>();
+        sensorMovimiento = GetComponent<MovementSensor>();
         actuador = GetComponent<AgentActuator>();
-
-        if (actuador.swordHitbox != null)
-            actuador.swordHitbox.SetOwner(this);
 
         estadoActual = Estado.Patrullando;
         PlanificarNuevaRuta();
@@ -55,13 +54,13 @@ public class PatrolBrain : MonoBehaviour, IDamageable
 
     void DeliberarPatrulla()
     {
-        if (sensor.PuedeVerLadron())
+        if (sensorVision.PuedeVerLadron())
         {
             estadoActual = Estado.Persiguiendo;
             return;
         }
 
-        if (actuador.HaLlegadoAlDestino())
+        if (sensorMovimiento.HaLlegadoAlDestino())
         {
             CambiarDestinoDePatrulla();
         }
@@ -71,19 +70,20 @@ public class PatrolBrain : MonoBehaviour, IDamageable
 
     void DeliberarPersecucion()
     {
-        if (!sensor.PuedeVerLadron())
+        if (!sensorVision.PuedeVerLadron())
         {
             estadoActual = Estado.Patrullando;
             PlanificarNuevaRuta();
             return;
         }
 
-        actuador.MoverA(sensor.ladron.position, velocidadCorrer, aceleracionCorrer, distanciaAtaque, true);
+        Vector3 posicionEnemigo = sensorVision.ObtenerPosicionObjetivo();
+        actuador.MoverA(posicionEnemigo, velocidadCorrer, aceleracionCorrer, distanciaAtaque, true);
 
-        if (actuador.EstaCercaDelObjetivo(distanciaAtaque) && !actuador.EstaAtacando)
+        if (sensorMovimiento.EstaCercaDelObjetivo(distanciaAtaque) && !actuador.EstaAtacando)
         {
             estadoActual = Estado.Atacando;
-            actuador.IniciarAtaque(sensor.ladron);
+            actuador.IniciarAtaque(posicionEnemigo);
         }
     }
 
@@ -91,7 +91,7 @@ public class PatrolBrain : MonoBehaviour, IDamageable
     {
         if (!actuador.EstaAtacando)
         {
-            if (sensor.PuedeVerLadron())
+            if (sensorVision.PuedeVerLadron())
                 estadoActual = Estado.Persiguiendo;
             else
             {
@@ -103,7 +103,7 @@ public class PatrolBrain : MonoBehaviour, IDamageable
 
     void PlanificarNuevaRuta()
     {
-        puntoA = transform.position;
+        puntoA = sensorMovimiento.ObtenerPosicionActual();
         float maxDistanciaEncontrada = 0f;
         Vector3 mejorPuntoB = puntoA;
 
@@ -112,10 +112,8 @@ public class PatrolBrain : MonoBehaviour, IDamageable
             float angulo = i * (360f / direccionesEscaneo);
             Vector3 direccion = Quaternion.Euler(0, angulo, 0) * Vector3.forward;
 
-            // 1. Sentir
-            float distanciaLibre = sensor.MedirDistanciaLibre(direccion, distanciaMaxEscaneo);
+            float distanciaLibre = sensorVision.MedirDistanciaLibre(direccion, distanciaMaxEscaneo);
 
-            // 2. Pensar
             if (distanciaLibre > margenPared)
             {
                 distanciaLibre -= margenPared;
@@ -127,7 +125,6 @@ public class PatrolBrain : MonoBehaviour, IDamageable
             }
         }
 
-        // 3. Decidir
         puntoB = mejorPuntoB;
         destinoActual = puntoB;
     }
@@ -138,10 +135,5 @@ public class PatrolBrain : MonoBehaviour, IDamageable
             destinoActual = puntoB;
         else
             destinoActual = puntoA;
-    }
-
-    public void OnSwordHitLadron()
-    {
-        UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
     }
 }
