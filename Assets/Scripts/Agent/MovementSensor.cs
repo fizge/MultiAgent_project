@@ -10,17 +10,20 @@ public class MovementSensor : MonoBehaviour
         agente = GetComponent<NavMeshAgent>();
     }
 
+    // Para la patrulla (usa la ruta del NavMesh)
     public bool HaLlegadoAlDestino()
     {
         return !agente.pathPending && agente.remainingDistance <= 0.3f;
     }
 
-    public bool EstaCercaDelObjetivo(float distancia)
+    // NUEVA FUNCIÓN: Comprueba la distancia real en el mundo 3D
+    // Evita que ataque desde lejos si el NavMesh aún no ha calculado la ruta
+    public bool EstaARangoFisico(Vector3 posicionObjetivo, float rango)
     {
-        return !agente.pathPending && agente.remainingDistance <= distancia;
+        float distanciaSqr = (transform.position - posicionObjetivo).sqrMagnitude;
+        return distanciaSqr <= (rango * rango);
     }
 
-    // NUEVO SENSOR: Le dice al cerebro dónde está su propio cuerpo
     public Vector3 ObtenerPosicionActual()
     {
         return transform.position;
