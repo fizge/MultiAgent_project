@@ -1,19 +1,81 @@
+using System;
 using UnityEngine;
 using UnityEngine.AI;
 
-// Proporciona los "ojos" al agente (Perception Subsystem) para detectar objetivos y medir el entorno.
+// Proporciona los ojos al agente para detectar objetivos y medir el entorno.
 public class VisionSensor : MonoBehaviour
 {
     // Mantiene la referencia privada al objetivo pero visible en el editor.
-    [SerializeField] private Transform ladron; 
+    [SerializeField] private Transform ladron;
 
     public float viewDistance = 12f;
     public float viewAngle = 180f;
-    public Transform eyePoint; // Punto de origen de la visión (ojos).
+    public Transform eyePoint; // Punto de origen de la visión
     public LayerMask obstacleMask;
     public LayerMask targetMask;
-    
+
     public float alturaTorso = 0.2f;
+
+  
+    public int direccionesEscaneo = 16;
+    public float distanciaMaxEscaneo = 50f;
+    public float distanciaProxima = 0.5f;
+
+    // Eventos que notifican cambios de visibilidad 
+    public event Action OnLadronAvistado;
+    public event Action OnLadronPerdido;
+
+    // Eventos de proximidad.
+    public event Action OnLadronMuyCerca;
+    public event Action OnLadronLejos;
+
+    // Evento emitido con el resultado del escaneo del entorno.
+    // Parámetros: direcciones escaneadas, distancia libre en cada dirección.
+    public event Action<Vector3[], float[]> OnEscaneoCompletado;
+
+    // Última posición conocida del ladrón mientras es visible.
+    public Vector3 PosicionLadron { get; private set; }
+
+    private bool ladronVisibleAntes = false;
+    private bool ladronMuyCercaAntes = false;
+
+    void Start()
+    {
+        EscanearEntorno();
+    }
+
+    void Update()
+    {
+        bool visible = PuedeVerLadron();
+        if (visible) PosicionLadron = ObtenerPosicionObjetivo();
+
+        if (visible && !ladronVisibleAntes) OnLadronAvistado?.Invoke();
+        if (!visible && ladronVisibleAntes) { OnLadronPerdido?.Invoke(); EscanearEntorno(); }
+        ladronVisibleAntes = visible;
+
+        // Detección de proximidad: solo relevante cuando el ladrón es visible.
+        bool muyCerca = visible && (PosicionLadron - transform.position).sqrMagnitude <= distanciaProxima * distanciaProxima;
+        if (muyCerca && !ladronMuyCercaAntes) OnLadronMuyCerca?.Invoke();
+        if (!muyCerca && ladronMuyCercaAntes) OnLadronLejos?.Invoke();
+        ladronMuyCercaAntes = muyCerca;
+    }
+
+    // Escanea el entorno y emite OnEscaneoCompletado con los datos en bruto.
+    // Se llama en Start y cada vez que el ladrón se pierde de vista.
+    void EscanearEntorno()
+    {
+        Vector3[] direcciones = new Vector3[direccionesEscaneo];
+        float[] distancias = new float[direccionesEscaneo];
+
+        for (int i = 0; i < direccionesEscaneo; i++)
+        {
+            float angulo = i * (360f / direccionesEscaneo);
+            direcciones[i] = Quaternion.Euler(0, angulo, 0) * Vector3.forward;
+            distancias[i] = MedirDistanciaLibre(direcciones[i], distanciaMaxEscaneo);
+        }
+
+        OnEscaneoCompletado?.Invoke(direcciones, distancias);
+    }
 
     // Detecta si el objetivo está dentro del rango, ángulo y línea de visión.
     public bool PuedeVerLadron()

@@ -1,33 +1,32 @@
+using System;
 using UnityEngine;
 using UnityEngine.AI;
 
-// Proporciona información sobre el estado físico y la posición del agente 
+// Proporciona información sobre el estado físico y la posición del agente.
 public class MovementSensor : MonoBehaviour
 {
+    // Evento de estado 
+    public event Action OnDestinoAlcanzado;
+
     private NavMeshAgent agente;
+    private bool llegadoAntes = false;
 
     void Awake()
     {
         agente = GetComponent<NavMeshAgent>();
     }
 
-    // Verifica si el agente ha completado su ruta de navegación (usado en patrulla).
+    void Update()
+    {
+        bool llegado = HaLlegadoAlDestino();
+        if (llegado && !llegadoAntes) OnDestinoAlcanzado?.Invoke();
+        llegadoAntes = llegado;
+    }
+
+    // Verifica si el agente ha completado su ruta de navegación.
     public bool HaLlegadoAlDestino()
     {
-        return !agente.pathPending && agente.remainingDistance <= 0.3f;
+        return agente.hasPath && !agente.pathPending && agente.remainingDistance <= 0.3f;
     }
 
-    // Comprueba la distancia física real contra un objetivo para validar el rango de ataque.
-    public bool EstaARangoFisico(Vector3 posicionObjetivo, float rango)
-    {
-        // Optimizado usando magnitud al cuadrado para evitar el coste del cálculo de raíz cuadrada.
-        float distanciaSqr = (transform.position - posicionObjetivo).sqrMagnitude;
-        return distanciaSqr <= (rango * rango);
-    }
-
-    // Devuelve las coordenadas actuales del cuerpo en el mundo.
-    public Vector3 ObtenerPosicionActual()
-    {
-        return transform.position;
-    }
 }

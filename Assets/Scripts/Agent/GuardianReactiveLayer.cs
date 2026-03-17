@@ -11,15 +11,22 @@ public class GuardianReactiveLayer : ReactiveLayer
     public float anguloVigilancia = 90f;
 
     private VisionSensor sensorVision;
-    private MovementSensor sensorMovimiento;
 
     private float anguloGiroActual = 0f;
     private float direccionGiro = 1f;
 
+    // Estado interno actualizado por eventos de los sensores.
+    private bool ladronVisible = false;
+    private bool dentroDeRango = false;
+
     void Awake()
     {
         sensorVision = GetComponent<VisionSensor>();
-        sensorMovimiento = GetComponent<MovementSensor>();
+
+        sensorVision.OnLadronAvistado += () => ladronVisible = true;
+        sensorVision.OnLadronPerdido  += () => ladronVisible = false;
+        sensorVision.OnLadronMuyCerca += () => dentroDeRango = true;
+        sensorVision.OnLadronLejos    += () => dentroDeRango = false;
     }
 
     public override ActionProposal GenerarPropuesta()
@@ -27,23 +34,23 @@ public class GuardianReactiveLayer : ReactiveLayer
         ActionProposal prop = new ActionProposal();
         prop.solicitaControl = true;
 
-        // Si detecta al ladrón -> perseguir y atacar.
-        if (sensorVision.PuedeVerLadron())
+        // Regla 1: ladrón visible -> perseguir y atacar.
+        if (ladronVisible)
         {
-            Vector3 posEnemigo = sensorVision.ObtenerPosicionObjetivo();
+            Vector3 posEnemigo = sensorVision.PosicionLadron;
             prop.destinoMovimiento = posEnemigo;
             prop.velocidad = velocidadCorrer;
             prop.aceleracion = aceleracionCorrer;
             prop.distanciaParada = distanciaAtaque;
             prop.corriendo = true;
 
-            if (sensorMovimiento.EstaARangoFisico(posEnemigo, distanciaAtaque))
+            if (dentroDeRango)
             {
                 prop.atacar = true;
                 prop.objetivoAtaque = posEnemigo;
             }
         }
-        // Sin amenaza -> oscilar la vista.
+        // Regla 2: sin amenaza -> oscilar la vista.
         else
         {
             float rotacionFrame = velocidadRotacionIdle * Time.deltaTime * direccionGiro;

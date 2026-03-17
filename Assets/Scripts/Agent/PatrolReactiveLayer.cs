@@ -10,20 +10,29 @@ public class PatrolReactiveLayer : ReactiveLayer
     public float distanciaAtaque = 1.5f;
     public float velocidadCaminar = 2f;
     public float aceleracionCaminar = 2f;
-    public int direccionesEscaneo = 16;
-    public float distanciaMaxEscaneo = 50f;
     public float margenPared = 1.5f;
 
     private VisionSensor sensorVision;
     private MovementSensor sensorMovimiento;
 
     private Vector3 puntoA, puntoB, destinoActual;
-    private bool rutaCalculada = false;
+
+    // Estado interno actualizado por eventos de los sensores.
+    private bool ladronVisible = false;
+    private bool dentroDeRango = false;
+    private bool destinoAlcanzado = false;
 
     void Awake()
     {
         sensorVision = GetComponent<VisionSensor>();
         sensorMovimiento = GetComponent<MovementSensor>();
+
+        sensorVision.OnLadronAvistado    += () => ladronVisible = true;
+        sensorVision.OnLadronPerdido     += () => ladronVisible = false;
+        sensorVision.OnLadronMuyCerca    += () => dentroDeRango = true;
+        sensorVision.OnLadronLejos       += () => dentroDeRango = false;
+        sensorVision.OnEscaneoCompletado += PlanificarNuevaRuta;
+        sensorMovimiento.OnDestinoAlcanzado += () => destinoAlcanzado = true;
     }
 
     public override ActionProposal GenerarPropuesta()
@@ -31,27 +40,26 @@ public class PatrolReactiveLayer : ReactiveLayer
         ActionProposal prop = new ActionProposal();
         prop.solicitaControl = true;
 
-        // Si detecta al ladrón -> perseguir y atacar.
-        if (sensorVision.PuedeVerLadron())
+        // Regla 1: ladrón visible -> perseguir y atacar.
+        if (ladronVisible)
         {
-            Vector3 posEnemigo = sensorVision.ObtenerPosicionObjetivo();
+            Vector3 posEnemigo = sensorVision.PosicionLadron;
             prop.destinoMovimiento = posEnemigo;
             prop.velocidad = velocidadCorrer;
             prop.aceleracion = aceleracionCorrer;
             prop.distanciaParada = distanciaAtaque;
             prop.corriendo = true;
 
-            if (sensorMovimiento.EstaARangoFisico(posEnemigo, distanciaAtaque))
+            if (dentroDeRango)
             {
                 prop.atacar = true;
                 prop.objetivoAtaque = posEnemigo;
             }
         }
-        // Sin amenaza -> patrullar.
+        // Regla 2: sin amenaza -> patrullar.
         else
         {
-            if (!rutaCalculada) { PlanificarNuevaRuta(); rutaCalculada = true; }
-            if (sensorMovimiento.HaLlegadoAlDestino()) CambiarDestinoDePatrulla();
+            if (destinoAlcanzado) { CambiarDestinoDePatrulla(); destinoAlcanzado = false; }
 
             prop.destinoMovimiento = destinoActual;
             prop.velocidad = velocidadCaminar;
@@ -63,26 +71,24 @@ public class PatrolReactiveLayer : ReactiveLayer
         return prop;
     }
 
-    // Analiza el entorno con raycasts de NavMesh para encontrar el punto más lejano sin obstáculos.
-    void PlanificarNuevaRuta()
+    // Recibe los datos del escaneo del sensor y calcula los puntos de patrulla.
+    void PlanificarNuevaRuta(Vector3[] direcciones, float[] distancias)
     {
+        destinoAlcanzado = false;
         puntoA = transform.position;
         float maxDistanciaEncontrada = 0f;
         Vector3 mejorPuntoB = puntoA;
 
-        for (int i = 0; i < direccionesEscaneo; i++)
+        for (int i = 0; i < direcciones.Length; i++)
         {
-            float angulo = i * (360f / direccionesEscaneo);
-            Vector3 direccion = Quaternion.Euler(0, angulo, 0) * Vector3.forward;
-            float distanciaLibre = sensorVision.MedirDistanciaLibre(direccion, distanciaMaxEscaneo);
-
+            float distanciaLibre = distancias[i];
             if (distanciaLibre > margenPared)
             {
                 distanciaLibre -= margenPared;
                 if (distanciaLibre > maxDistanciaEncontrada)
                 {
                     maxDistanciaEncontrada = distanciaLibre;
-                    mejorPuntoB = puntoA + direccion * distanciaLibre;
+                    mejorPuntoB = puntoA + direcciones[i] * distanciaLibre;
                 }
             }
         }

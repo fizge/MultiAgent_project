@@ -2,7 +2,7 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.AI;
 
-// Este componente actúa como los "músculos" del agente (Subsistema de Acción).
+// Este componente actúa como los músculos del agente (Subsistema de Acción).
 // Recibe órdenes del ControlSubsystem y las ejecuta usando el NavMeshAgent y el Animator.
 public class AgentActuator : MonoBehaviour
 {
@@ -47,6 +47,7 @@ public class AgentActuator : MonoBehaviour
     // Rota el cuerpo del agente sobre su eje Y (usado para la vigilancia del Guardián)
     public void Rotar(float grados)
     {
+        Detener();
         transform.Rotate(0f, grados, 0f);
     }
 
