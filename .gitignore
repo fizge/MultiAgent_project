@@ -5,6 +5,7 @@
 [Bb]uilds/
 [Ll]ogs/
 UserSettings/
+CLAUDE.md
 
 # Visual Studio / Rider
 .vs/
@@ -27,3 +28,5 @@ UserSettings/
 # OS files
 .DS_Store
 Thumbs.db
+
+
