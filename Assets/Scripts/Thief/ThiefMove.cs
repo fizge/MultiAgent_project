@@ -1,5 +1,7 @@
 using UnityEngine;
 
+// Controlador del ladrón: WASD para moverse, S hace un giro de 180°.
+// Usa CharacterController, no NavMesh.
 public class ThiefMove : MonoBehaviour
 {
     public float rotationSpeed = 540f;

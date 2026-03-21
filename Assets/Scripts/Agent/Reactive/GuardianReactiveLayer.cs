@@ -14,7 +14,7 @@ public class GuardianReactiveLayer : ReactiveLayer
 
     void Awake()
     {
-        var sensorVision = GetComponent<VisionSensor>();
+        VisionSensor sensorVision = GetComponent<VisionSensor>();
 
         attack = new AttackBehaviour { speed = velocidadCorrer, acceleration = aceleracionCorrer, stopDistance = distanciaAtaque };
         attack.Initialize(sensorVision);

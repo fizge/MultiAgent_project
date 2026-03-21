@@ -15,8 +15,8 @@ public class PatrolReactiveLayer : ReactiveLayer
 
     void Awake()
     {
-        var sensorVision     = GetComponent<VisionSensor>();
-        var sensorMovimiento = GetComponent<MovementSensor>();
+        VisionSensor sensorVision      = GetComponent<VisionSensor>();
+        MovementSensor sensorMovimiento = GetComponent<MovementSensor>();
 
         attack = new AttackBehaviour { speed = velocidadCorrer, acceleration = aceleracionCorrer, stopDistance = distanciaAtaque };
         attack.Initialize(sensorVision);

@@ -1,14 +1,12 @@
 using UnityEngine;
 
+// Trigger invisible que marca la salida del castillo.
+// Cuando el ladrón entra, avisa al GameManager para ver si puede escapar.
 public class ZonaSalida : MonoBehaviour
 {
     private void OnTriggerEnter(Collider other)
     {
-        // Verificamos que sea el jugador el que toca el cubo
         if (other.CompareTag("Ladron"))
-        {
-            // Le decimos al GameManager que el jugador intenta salir
             GameManager.Instance.IntentarFinalizarMision();
-        }
     }
 }

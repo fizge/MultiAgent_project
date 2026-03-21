@@ -5,7 +5,6 @@ public class MenuVictoria : MonoBehaviour
 {
     public void VolverAJugar()
     {
-        // Carga tu escena principal (pon el nombre real de tu nivel)
         SceneManager.LoadScene("Castle"); 
     }
 

@@ -1,5 +1,6 @@
 using UnityEngine;
 
+// Cámara en tercera persona que sigue al ladrón desde atrás y arriba.
 public class ThirdPersonCamera : MonoBehaviour
 {
     public Transform target;
