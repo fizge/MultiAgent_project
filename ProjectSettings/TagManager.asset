@@ -5,6 +5,7 @@ TagManager:
   serializedVersion: 3
   tags:
   - Ladron
+  - Esqueleto
   layers:
   - Default
   - TransparentFX

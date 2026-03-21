@@ -1,5 +1,5 @@
 // Reactive Layer para guardias patrulleros.
-// Prioridad: AttackBehaviour > ChaseBehaviour > PatrolBehaviour.
+// Prioridad: Attack > Chase > Investigate > FollowGuard > Patrol.
 public class PatrolReactiveLayer : ReactiveLayer
 {
     public float velocidadCorrer     = 5f;
@@ -9,14 +9,17 @@ public class PatrolReactiveLayer : ReactiveLayer
     public float aceleracionCaminar  = 2f;
     public float margenPared         = 1.5f;
 
-    private AttackBehaviour attack;
-    private ChaseBehaviour  chase;
-    private PatrolBehaviour patrol;
+    private AttackBehaviour      attack;
+    private ChaseBehaviour       chase;
+    private InvestigateBehaviour investigate;
+    private FollowGuardBehaviour followGuard;
+    private PatrolBehaviour      patrol;
 
     void Awake()
     {
-        VisionSensor sensorVision      = GetComponent<VisionSensor>();
+        VisionSensor   sensorVision     = GetComponent<VisionSensor>();
         MovementSensor sensorMovimiento = GetComponent<MovementSensor>();
+        HearingSensor  sensorEscucha    = GetComponent<HearingSensor>();
 
         attack = new AttackBehaviour { speed = velocidadCorrer, acceleration = aceleracionCorrer, stopDistance = distanciaAtaque };
         attack.Initialize(sensorVision);
@@ -24,10 +27,16 @@ public class PatrolReactiveLayer : ReactiveLayer
         chase = new ChaseBehaviour { speed = velocidadCorrer, acceleration = aceleracionCorrer, stopDistance = distanciaAtaque };
         chase.Initialize(sensorVision);
 
+        investigate = new InvestigateBehaviour { speed = velocidadCaminar, acceleration = aceleracionCaminar };
+        investigate.Initialize(sensorEscucha, sensorVision);
+
+        followGuard = new FollowGuardBehaviour { speed = velocidadCaminar, acceleration = aceleracionCaminar };
+        followGuard.Initialize(sensorEscucha, sensorVision);
+
         patrol = new PatrolBehaviour { speed = velocidadCaminar, acceleration = aceleracionCaminar, wallMargin = margenPared };
         patrol.Initialize(sensorVision, sensorMovimiento, transform);
     }
 
     public override ActionProposal GenerarPropuesta() =>
-        attack.Evaluate() ?? chase.Evaluate() ?? patrol.Evaluate();
+        attack.Evaluate() ?? chase.Evaluate() ?? investigate.Evaluate() ?? followGuard.Evaluate() ?? patrol.Evaluate();
 }
