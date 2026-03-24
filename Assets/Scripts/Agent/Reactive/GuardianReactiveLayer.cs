@@ -16,6 +16,7 @@ public class GuardianReactiveLayer : ReactiveLayer
     private FollowGuardBehaviour followGuard;
     private WatchBehaviour       watch;
 
+    // Para cada comportamiento, se crean y se inicializan suscribiendo los eventos del sensor
     void Awake()
     {
         VisionSensor  sensorVision  = GetComponent<VisionSensor>();
@@ -37,6 +38,7 @@ public class GuardianReactiveLayer : ReactiveLayer
         watch.Initialize(transform);
     }
 
+    // Se genera la propuesta según prioridad de la acción
     public override ActionProposal GenerarPropuesta() =>
         attack.Evaluate() ?? chase.Evaluate() ?? investigate.Evaluate() ?? followGuard.Evaluate() ?? watch.Evaluate();
 }

@@ -19,6 +19,8 @@ public class WatchBehaviour : IBehaviour
     {
         float rotacionFrame = rotationSpeed * Time.deltaTime * direccionGiro;
         anguloActual += rotacionFrame;
+        
+        // Si se alcanza el límite del arco, invertir el sentido de giro.
         if      (anguloActual >=  watchAngle) direccionGiro = -1f;
         else if (anguloActual <= -watchAngle) direccionGiro =  1f;
 

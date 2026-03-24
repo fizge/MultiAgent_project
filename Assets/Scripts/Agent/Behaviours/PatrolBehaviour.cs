@@ -61,5 +61,6 @@ public class PatrolBehaviour : IBehaviour
 
     // Alterna el destino entre puntoA y puntoB.
     private void CambiarDestino() =>
+        // Si el agente está cerquísima del puntoA, el destino pasa a ser el puntoB, sino, puntoA
         destinoActual = (Vector3.SqrMagnitude(destinoActual - puntoA) < 0.1f) ? puntoB : puntoA;
 }

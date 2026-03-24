@@ -38,7 +38,7 @@ public class HearingSensor : MonoBehaviour
 
             float distancia = Vector3.Distance(transform.position, emisor.transform.position);
 
-            // Detección cuando los dos radios se solapan.
+            // Si los radios no se solapan, no hay detección → saltar al siguiente emisor.
             if (distancia > radioEscucha + emisor.radioActual) continue;
 
             if (emisor.CompareTag("Ladron"))

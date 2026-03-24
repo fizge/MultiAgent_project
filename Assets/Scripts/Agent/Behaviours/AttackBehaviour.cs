@@ -9,6 +9,7 @@ public class AttackBehaviour : IBehaviour
     private bool ladronVisible;
     private bool dentroDeRango;
 
+// Método que recibe el sensor de visión y se suscribe a sus eventos
     public void Initialize(VisionSensor visionSensor)
     {
         sensor = visionSensor;
@@ -20,6 +21,7 @@ public class AttackBehaviour : IBehaviour
 
     public ActionProposal Evaluate()
     {
+        // Si ladrón visible y está dentro de rango, solicita control
         if (!ladronVisible || !dentroDeRango) return null;
 
         return new ActionProposal

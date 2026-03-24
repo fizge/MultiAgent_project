@@ -9,6 +9,7 @@ public class ChaseBehaviour : IBehaviour
     private bool ladronVisible;
     private bool dentroDeRango;
 
+// Método que recibe el sensor de visión y se suscribe a sus eventos
     public void Initialize(VisionSensor visionSensor)
     {
         sensor = visionSensor;
@@ -20,6 +21,7 @@ public class ChaseBehaviour : IBehaviour
 
     public ActionProposal Evaluate()
     {
+        // Si el ladrón es visible pero no está dentro de rango, solicita control
         if (!ladronVisible || dentroDeRango) return null;
 
         return new ActionProposal
