@@ -1,11 +1,14 @@
+// Script para manejar el juego, sabe si el ladrón ya tiene el botín y decide cuándo se ha ganado.
+using System.Collections;
 using UnityEngine;
-using UnityEngine.SceneManagement; 
+using UnityEngine.SceneManagement;
 
-// Singleton que lleva la cuenta del estado de la misión.
-// Sabe si el ladrón ya tiene el botín y decide cuándo se ha ganado.
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance;
+
+    // Captura del último frame del juego; MenuVictoria la usa como fondo difuminado.
+    public static Texture2D capturedScreenshot;
 
     public bool hasLoot = false;
     public string nombreEscenaVictoria = "Victoria";
@@ -32,7 +35,7 @@ public class GameManager : MonoBehaviour
         if (hasLoot)
         {
             Debug.Log("¡Misión cumplida! El ladrón escapó con el botín.");
-            TerminarJuego();
+            StartCoroutine(CapturarYCargar());
         }
         else
         {
@@ -40,8 +43,11 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private void TerminarJuego()
+    // Espera al final del frame para que la imagen esté renderizada, captura y carga.
+    private IEnumerator CapturarYCargar()
     {
+        yield return new WaitForEndOfFrame();
+        capturedScreenshot = ScreenCapture.CaptureScreenshotAsTexture();
         SceneManager.LoadScene(nombreEscenaVictoria);
     }
 }
