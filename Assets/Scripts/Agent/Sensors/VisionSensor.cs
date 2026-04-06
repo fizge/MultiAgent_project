@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -39,6 +40,9 @@ public class VisionSensor : MonoBehaviour
     private bool ladronVisibleAntes = false;
     private bool ladronMuyCercaAntes = false;
 
+    // Estado anterior de cada reja para detectar cambios.
+    private Dictionary<DynamicBars, bool> estadoAntesRejas = new Dictionary<DynamicBars, bool>();
+
     void Start()
     {
         EscanearEntorno();
@@ -58,6 +62,38 @@ public class VisionSensor : MonoBehaviour
         if (muyCerca && !ladronMuyCercaAntes) OnLadronMuyCerca?.Invoke();
         if (!muyCerca && ladronMuyCercaAntes) OnLadronLejos?.Invoke();
         ladronMuyCercaAntes = muyCerca;
+
+        ComprobarRejas();
+    }
+
+    // Recorre todas las rejas de la escena y detecta si alguna visible ha cambiado de estado.
+    void ComprobarRejas()
+    {
+        foreach (DynamicBars reja in DynamicBars.todas)
+        {
+            bool estadoActual = reja.EstaArriba;
+
+            // Si es la primera vez que vemos esta reja, registramos su estado sin reaccionar.
+            if (!estadoAntesRejas.ContainsKey(reja))
+            {
+                estadoAntesRejas[reja] = estadoActual;
+                continue;
+            }
+
+            bool estadoAntes = estadoAntesRejas[reja];
+
+            // Solo reaccionar si el estado cambió y la reja está dentro del campo de visión.
+            if (estadoActual != estadoAntes)
+            {
+                estadoAntesRejas[reja] = estadoActual;
+
+                Vector3 haciaLaReja = reja.transform.position - transform.position;
+                if (haciaLaReja.magnitude > viewDistance) continue;
+                if (Vector3.Angle(transform.forward, haciaLaReja) > viewAngle * 0.5f) continue;
+
+                EscanearEntorno();
+            }
+        }
     }
 
     // Escanea el entorno y emite OnEscaneoCompletado con los datos en bruto.
