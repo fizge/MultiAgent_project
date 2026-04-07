@@ -54,11 +54,11 @@ public class HearingSensor : MonoBehaviour
         }
 
         // Disparar eventos en cambio de estado (igual que VisionSensor).
-        if (ladronDetectado  && !ladronEscuchadoAntes)  { Debug.Log($"[HearingSensor] {name} escucha al ladrón");         OnLadronEscuchado?.Invoke(PosicionRuidoLadron); }
-        if (!ladronDetectado &&  ladronEscuchadoAntes)  { Debug.Log($"[HearingSensor] {name} deja de escuchar al ladrón"); OnLadronNoEscuchado?.Invoke(); }
+        if (ladronDetectado  && !ladronEscuchadoAntes)  { /*Debug.Log($"[HearingSensor] {name} escucha al ladrón");*/         OnLadronEscuchado?.Invoke(PosicionRuidoLadron); }
+        if (!ladronDetectado &&  ladronEscuchadoAntes)  { /*Debug.Log($"[HearingSensor] {name} deja de escuchar al ladrón");*/ OnLadronNoEscuchado?.Invoke(); }
 
-        if (esqueletoDetectado  && !esqueletoEscuchadoAntes) { Debug.Log($"[HearingSensor] {name} escucha a un esqueleto corriendo en {PosicionRuidoEsqueleto}");         OnEsqueletoEscuchado?.Invoke(PosicionRuidoEsqueleto); }
-        if (!esqueletoDetectado &&  esqueletoEscuchadoAntes) { Debug.Log($"[HearingSensor] {name} deja de escuchar al esqueleto"); OnEsqueletoNoEscuchado?.Invoke(); }
+        if (esqueletoDetectado  && !esqueletoEscuchadoAntes) { /*Debug.Log($"[HearingSensor] {name} escucha a un esqueleto corriendo en {PosicionRuidoEsqueleto}");*/         OnEsqueletoEscuchado?.Invoke(PosicionRuidoEsqueleto); }
+        if (!esqueletoDetectado &&  esqueletoEscuchadoAntes) { /*Debug.Log($"[HearingSensor] {name} deja de escuchar al esqueleto");*/ OnEsqueletoNoEscuchado?.Invoke(); }
 
         ladronEscuchadoAntes  = ladronDetectado;
         esqueletoEscuchadoAntes = esqueletoDetectado;

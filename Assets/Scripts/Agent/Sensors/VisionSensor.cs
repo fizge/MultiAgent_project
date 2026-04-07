@@ -57,6 +57,7 @@ public class VisionSensor : MonoBehaviour
     void Start()
     {
         if (cofre != null) posicionCofre = cofre.position;
+        GetComponent<MovementSensor>().OnDestinoAlcanzado += EscanearEntorno; // Re-escanea el entorno cada vez que se alcanza un destino, para actualizar la ruta cuando llega a la zona de salida.
         EscanearEntorno();
     }
 
@@ -114,12 +115,10 @@ public class VisionSensor : MonoBehaviour
     void ComprobarCofre()
     {
         if (cofresDesaparecidoNotificado) return;
-        if (cofre == null) { Debug.Log($"[ComprobarCofre] {name} cofre es null"); return; }
-        if (!GameManager.Instance.hasLoot) { Debug.Log($"[ComprobarCofre] {name} hasLoot es false"); return; }
+        if (GameManager.Instance == null || !GameManager.Instance.hasLoot) return;
 
         Vector3 haciaElCofre = posicionCofre - transform.position;
-        Debug.Log($"[ComprobarCofre] {name} distancia al cofre: {haciaElCofre.magnitude}");
-        if (haciaElCofre.magnitude > viewDistance + 5f) return;
+        if (haciaElCofre.magnitude > viewDistance ) return;
 
         cofresDesaparecidoNotificado = true;
         Debug.Log($"[VisionSensor] {name} detecta que el cofre ha desaparecido");

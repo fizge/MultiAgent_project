@@ -28,7 +28,7 @@ public class FollowGuardBehaviour : IBehaviour
     {
         if (!esqueletoEscuchado || ladronVisible || ladronEscuchado) return null;
 
-        Debug.Log("[FollowGuardBehaviour] Siguiendo a esqueleto que corre");
+        //Debug.Log("[FollowGuardBehaviour] Siguiendo a esqueleto que corre");
         return new ActionProposal
         {
             solicitaControl   = true,

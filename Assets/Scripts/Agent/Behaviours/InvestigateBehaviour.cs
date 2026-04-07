@@ -28,7 +28,7 @@ public class InvestigateBehaviour : IBehaviour
     {
         if (!ladronEscuchado || ladronVisible) return null;
 
-        Debug.Log("[InvestigateBehaviour] Investigando zona de ruido");
+        //Debug.Log("[InvestigateBehaviour] Investigando zona de ruido");
         return new ActionProposal
         {
             solicitaControl   = true,
