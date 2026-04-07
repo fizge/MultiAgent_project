@@ -9,6 +9,9 @@ public class VisionSensor : MonoBehaviour
     // Mantiene la referencia privada al objetivo pero visible en el editor.
     [SerializeField] private Transform ladron;
 
+    // Posición del cofre en el mapa; se guarda al inicio por si el objeto se destruye.
+    [SerializeField] private Transform cofre;
+
     public float viewDistance = 12f;
     public float viewAngle = 180f;
     public Transform eyePoint; // Punto de origen de la visión
@@ -34,6 +37,9 @@ public class VisionSensor : MonoBehaviour
     // Parámetros: direcciones escaneadas, distancia libre en cada dirección.
     public event Action<Vector3[], float[]> OnEscaneoCompletado;
 
+    // Evento emitido una sola vez cuando el guardia mira hacia el cofre y detecta que fue robado.
+    public event Action OnCofresDesaparecido;
+
     // Última posición conocida del ladrón mientras es visible.
     public Vector3 PosicionLadron { get; private set; }
 
@@ -43,8 +49,14 @@ public class VisionSensor : MonoBehaviour
     // Estado anterior de cada reja para detectar cambios.
     private Dictionary<DynamicBars, bool> estadoAntesRejas = new Dictionary<DynamicBars, bool>();
 
+    // Posición guardada del cofre al inicio, por si el GameObject se destruye antes de la detección.
+    private Vector3 posicionCofre;
+    // Evita disparar OnCofresDesaparecido más de una vez.
+    private bool cofresDesaparecidoNotificado = false;
+
     void Start()
     {
+        if (cofre != null) posicionCofre = cofre.position;
         EscanearEntorno();
     }
 
@@ -64,6 +76,7 @@ public class VisionSensor : MonoBehaviour
         ladronMuyCercaAntes = muyCerca;
 
         ComprobarRejas();
+        ComprobarCofre();
     }
 
     // Recorre todas las rejas de la escena y detecta si alguna visible ha cambiado de estado.
@@ -94,6 +107,23 @@ public class VisionSensor : MonoBehaviour
                 EscanearEntorno();
             }
         }
+    }
+
+    // Detecta si el guardia está mirando hacia el cofre y el botín ya fue robado.
+    // Se dispara una sola vez para que el behaviour reaccione sin repeticiones.
+    void ComprobarCofre()
+    {
+        if (cofresDesaparecidoNotificado) return;
+        if (cofre == null) { Debug.Log($"[ComprobarCofre] {name} cofre es null"); return; }
+        if (!GameManager.Instance.hasLoot) { Debug.Log($"[ComprobarCofre] {name} hasLoot es false"); return; }
+
+        Vector3 haciaElCofre = posicionCofre - transform.position;
+        Debug.Log($"[ComprobarCofre] {name} distancia al cofre: {haciaElCofre.magnitude}");
+        if (haciaElCofre.magnitude > viewDistance + 5f) return;
+
+        cofresDesaparecidoNotificado = true;
+        Debug.Log($"[VisionSensor] {name} detecta que el cofre ha desaparecido");
+        OnCofresDesaparecido?.Invoke();
     }
 
     // Escanea el entorno y emite OnEscaneoCompletado con los datos en bruto.
