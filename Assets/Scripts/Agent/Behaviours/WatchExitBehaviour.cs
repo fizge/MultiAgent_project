@@ -5,33 +5,34 @@ using UnityEngine.AI;
 // y corre hacia la zona de salida para interceptar al ladrón.
 public class WatchExitBehaviour : IBehaviour
 {
-    public float speed       = 4f;
+    public float speed = 4f; // Aumentamos la velocidad del guardia cuando se ha robado el cofre
     public float acceleration = 4f;
 
-    public float radioImprecision = 3f;
+    public float radioImprecision = 3f; // Offset aleatorio para no ir siempre al mismo punto exacto de la puerta
 
-    private Transform zonaSalida;
-    private bool cofresDesaparecido = false;
-    private Vector3 destinoConOffset;
+    private Transform zonaSalida; // Referencia a la zona de salida
+    private bool cofresDesaparecido = false; // Flag para saber si el cofre ha sido robado
+    private Vector3 destinoConOffset; // Destino calculado con el offset aleatorio, fijo para no cambiarlo en cada frame
 
     public void Initialize(VisionSensor vision, MovementSensor movement, Transform zonaSalida)
     {
         this.zonaSalida = zonaSalida;
-        vision.OnCofresDesaparecido += OnCofresDesaparecido;
+        vision.OnCofresDesaparecido += OnCofresDesaparecido; // Se suscribe al evento de desaparición de los cofres
         movement.OnDestinoAlcanzado += () => cofresDesaparecido = false;
     }
 
     // Calcula el offset una sola vez al activarse, para que el destino sea estable mientras corre.
     private void OnCofresDesaparecido()
     {
+        // Genera un offset aleatorio dentro de un círculo para no ir siempre al mismo punto exacto de la puerta.
         Vector2 offset = Random.insideUnitCircle * radioImprecision;
         // Z solo se suma (nunca se resta) para no cruzar la puerta hacia el exterior.
         Vector3 candidato = zonaSalida.position + new Vector3(offset.x, 0f, Mathf.Abs(offset.y));
 
-        // Ajustar al punto válido más cercano del NavMesh.
+        // Busca el punto válido en la NavMesh más cercano al punto candidato
         if (NavMesh.SamplePosition(candidato, out NavMeshHit hit, radioImprecision, NavMesh.AllAreas))
             destinoConOffset = hit.position;
-        else
+        else // Si no lo encuentra, usa el centro de la zona de salida
             destinoConOffset = zonaSalida.position;
 
         cofresDesaparecido = true;
@@ -39,7 +40,7 @@ public class WatchExitBehaviour : IBehaviour
 
     public ActionProposal Evaluate()
     {
-        if (!cofresDesaparecido) return null;
+        if (!cofresDesaparecido) return null; // Si el cofre no ha sido robado, no hace nada.
 
         Debug.Log("[WatchExitBehaviour] Corriendo hacia la salida");
         return new ActionProposal
