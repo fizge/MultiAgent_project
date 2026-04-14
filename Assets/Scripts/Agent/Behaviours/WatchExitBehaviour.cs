@@ -1,8 +1,8 @@
+// Comportamiento de vigilancia de salida: el guardia detecta que el cofre fue robado
+// y corre hacia la zona de salida para interceptar al ladrón.
 using UnityEngine;
 using UnityEngine.AI;
 
-// Comportamiento de vigilancia de salida: el guardia detecta que el cofre fue robado
-// y corre hacia la zona de salida para interceptar al ladrón.
 public class WatchExitBehaviour : IBehaviour
 {
     public float speed = 4f; // Aumentamos la velocidad del guardia cuando se ha robado el cofre
@@ -45,12 +45,12 @@ public class WatchExitBehaviour : IBehaviour
         Debug.Log("[WatchExitBehaviour] Corriendo hacia la salida");
         return new ActionProposal
         {
-            solicitaControl   = true,
+            solicitaControl = true,
             destinoMovimiento = destinoConOffset,
-            velocidad         = speed,
-            aceleracion       = acceleration,
-            distanciaParada   = 0f,
-            corriendo         = true
+            velocidad = speed,
+            aceleracion = acceleration,
+            distanciaParada = 0f,
+            corriendo = true
         };
     }
 }

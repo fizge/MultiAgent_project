@@ -1,11 +1,11 @@
+// Comportamiento de patrulla: mueve al guardia entre dos puntos calculados por escaneo de direcciones.
 using UnityEngine;
 
-// Comportamiento de patrulla: mueve al guardia entre dos puntos calculados por escaneo de direcciones.
 public class PatrolBehaviour : IBehaviour
 {
-    public float speed       = 2f;
+    public float speed = 2f;
     public float acceleration = 2f;
-    public float wallMargin  = 1.5f;
+    public float wallMargin = 1.5f;
 
     private Transform agentTransform;
     private Vector3 puntoA, puntoB, destinoActual;
@@ -14,22 +14,23 @@ public class PatrolBehaviour : IBehaviour
     public void Initialize(VisionSensor visionSensor, MovementSensor movementSensor, Transform transform)
     {
         agentTransform = transform;
-        visionSensor.OnEscaneoCompletado        += PlanificarNuevaRuta;
-        movementSensor.OnDestinoAlcanzado       += () => destinoAlcanzado = true;
+        visionSensor.OnEscaneoCompletado += PlanificarNuevaRuta; 
+        movementSensor.OnDestinoAlcanzado += () => destinoAlcanzado = true;
     }
 
     public ActionProposal Evaluate()
     {
+        // Si el destino actual fue alcanzado, alterna al otro punto.
         if (destinoAlcanzado) { CambiarDestino(); destinoAlcanzado = false; }
 
         return new ActionProposal
         {
-            solicitaControl   = true,
+            solicitaControl = true,
             destinoMovimiento = destinoActual,
-            velocidad         = speed,
-            aceleracion       = acceleration,
-            distanciaParada   = 0f,
-            corriendo         = false
+            velocidad = speed,
+            aceleracion = acceleration,
+            distanciaParada = 0f,
+            corriendo = false
         };
     }
 
@@ -50,13 +51,13 @@ public class PatrolBehaviour : IBehaviour
                 if (distanciaLibre > maxDistancia)
                 {
                     maxDistancia = distanciaLibre;
-                    mejorPuntoB  = puntoA + direcciones[i] * distanciaLibre;
+                    mejorPuntoB = puntoA + direcciones[i] * distanciaLibre;
                 }
             }
         }
 
-        puntoB         = mejorPuntoB;
-        destinoActual  = puntoB;
+        puntoB = mejorPuntoB;
+        destinoActual = puntoB;
     }
 
     // Alterna el destino entre puntoA y puntoB.

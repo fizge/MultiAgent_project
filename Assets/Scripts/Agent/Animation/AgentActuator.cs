@@ -1,19 +1,19 @@
+// Este componente actúa como los músculos del agente (Subsistema de Acción)
+// Recibe órdenes del ControlSubsystem y las ejecuta usando el NavMeshAgent y el Animator
 using System.Collections;
 using UnityEngine;
 using UnityEngine.AI;
 
-// Este componente actúa como los músculos del agente (Subsistema de Acción).
-// Recibe órdenes del ControlSubsystem y las ejecuta usando el NavMeshAgent y el Animator.
 public class AgentActuator : MonoBehaviour
 {
     private NavMeshAgent agente;
     private Animator animator;
     public SwordHitbox swordHitbox; // Referencia al script que gestiona el daño de la espada
 
-    public float idleAntesAtaque = 0.2f;    // Pausa breve antes de soltar el golpe
+    public float idleAntesAtaque = 0.2f; // Pausa breve antes de soltar el golpe
     public float delayActivarHitbox = 0.3f; // Tiempo que tarda la animación en llegar al punto de impacto
-    public float ventanaHitbox = 0.15f;     // Tiempo que el daño permanece activo
-    public float cooldownAtaque = 1.5f;     // Tiempo de espera entre ataques
+    public float ventanaHitbox = 0.15f; // Tiempo que el daño permanece activo
+    public float cooldownAtaque = 1.5f; // Tiempo de espera entre ataques
 
     // Propiedad que indica a las capas de control si el cuerpo está ocupado atacando
     public bool EstaAtacando { get; private set; }

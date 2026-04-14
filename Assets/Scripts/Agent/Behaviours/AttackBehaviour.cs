@@ -1,7 +1,7 @@
 // Comportamiento de ataque: activo cuando el ladrón está visible Y dentro del rango de ataque.
 public class AttackBehaviour : IBehaviour
 {
-    public float speed        = 5f;
+    public float speed = 5f;
     public float acceleration = 8f;
     public float stopDistance = 1.5f;
 
@@ -9,14 +9,14 @@ public class AttackBehaviour : IBehaviour
     private bool ladronVisible;
     private bool dentroDeRango;
 
-// Método que recibe el sensor de visión y se suscribe a sus eventos
+    // Método que recibe el sensor de visión y se suscribe a sus eventos
     public void Initialize(VisionSensor visionSensor)
     {
         sensor = visionSensor;
         sensor.OnLadronAvistado += () => ladronVisible = true;
-        sensor.OnLadronPerdido  += () => ladronVisible = false;
+        sensor.OnLadronPerdido += () => ladronVisible = false;
         sensor.OnLadronMuyCerca += () => dentroDeRango = true;
-        sensor.OnLadronLejos    += () => dentroDeRango = false;
+        sensor.OnLadronLejos += () => dentroDeRango = false;
     }
 
     public ActionProposal Evaluate()
@@ -26,14 +26,14 @@ public class AttackBehaviour : IBehaviour
 
         return new ActionProposal
         {
-            solicitaControl   = true,
+            solicitaControl = true,
             destinoMovimiento = sensor.PosicionLadron,
-            velocidad         = speed,
-            aceleracion       = acceleration,
-            distanciaParada   = stopDistance,
-            corriendo         = true,
-            atacar            = true,
-            objetivoAtaque    = sensor.PosicionLadron
+            velocidad = speed,
+            aceleracion = acceleration,
+            distanciaParada = stopDistance,
+            corriendo = true,
+            atacar = true,
+            objetivoAtaque = sensor.PosicionLadron
         };
     }
 }

@@ -1,10 +1,10 @@
+// Comportamiento de vigilancia estática: oscila la vista del guardia en un arco configurable.
 using UnityEngine;
 
-// Comportamiento de vigilancia estática: oscila la vista del guardia en un arco configurable.
 public class WatchBehaviour : IBehaviour
 {
-    public float rotationSpeed   = 30f;
-    public float watchAngle      = 90f;
+    public float rotationSpeed = 30f;
+    public float watchAngle = 90f;
 
     private Transform agentTransform;
     private float anguloActual;
@@ -21,14 +21,14 @@ public class WatchBehaviour : IBehaviour
         anguloActual += rotacionFrame;
         
         // Si se alcanza el límite del arco, invertir el sentido de giro.
-        if      (anguloActual >=  watchAngle) direccionGiro = -1f;
+        if (anguloActual >= watchAngle) direccionGiro = -1f;
         else if (anguloActual <= -watchAngle) direccionGiro =  1f;
 
         return new ActionProposal
         {
-            solicitaControl   = true,
-            rotarEnLugar      = true,
-            gradosRotacion    = rotacionFrame,
+            solicitaControl = true,
+            rotarEnLugar = true,
+            gradosRotacion = rotacionFrame,
             destinoMovimiento = agentTransform.position
         };
     }
