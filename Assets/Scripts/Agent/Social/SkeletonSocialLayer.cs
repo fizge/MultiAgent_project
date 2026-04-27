@@ -31,24 +31,25 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     // Estado interno
     private float timerActual;
 
-    // Payloads: contenido concreto que va dentro del campo "content" de cada ACLMessage
-    public struct ContenidoRequest
+    // Contents: contenido concreto que va dentro del campo "content" de cada ACLMessage
+    // Algunos mensajes no necesitan content (AGREE, REFUSE, ACCEPT_PROPOSAL, REJECT_PROPOSAL, CANCEL), pero otros sí para transmitir datos relevantes de la conversación
+    public struct ContentRequest
     {
         public string tarea;
     }
 
-    public struct ContenidoCFP
+    public struct ContentCFP
     {
         public string tarea;
         public Vector3 posicionReferencia;
     }
 
-    public struct ContenidoPropose
+    public struct ContentPropose
     {
         public float coste;
     }
 
-    public struct ContenidoInforme
+    public struct ContentInform
     {
         public string tarea;
         public bool exito;
@@ -56,16 +57,16 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     }
 
     // Eventos hacia la Deliberativa: traducen los ACLMessage entrantes a datos sin lenguaje FIPA
-    public event Action<string, string, string> OnRequestRecibido;          // from, tarea, convId
-    public event Action<string, bool, string> OnRespuestaRequestRecibida;   // from, acepto, convId
-    public event Action<string, string, Vector3, string> OnCFPRecibida;     // from, tarea, refPos, convId
-    public event Action<string, float, string> OnPropuestaRecibida;         // from, coste, convId
-    public event Action<string> OnAceptacionRecibida;                       // convId
-    public event Action<string> OnRechazoRecibido;                          // convId
-    public event Action<string, bool, object, string> OnResultadoRecibido;  // from, exito, datos, convId
-    public event Action<string> OnFalloRecibido;                            // convId
-    public event Action<string> OnCancelacionRecibida;                      // convId
-    public event Action OnTimerInicio;                                      // sin payload — es el turno de intentar iniciar
+    public event Action<string, string, string> OnRequestReceived;          // from, tarea, convId
+    public event Action<string, bool, string> OnRequestResponseReceived;   // from, acepto, convId
+    public event Action<string, string, Vector3, string> OnCFPReceived;     // from, tarea, refPos, convId
+    public event Action<string, float, string> OnProposalReceived;         // from, coste, convId
+    public event Action<string> OnProposalAccepted;                       // convId
+    public event Action<string> OnProposalRejected;                          // convId
+    public event Action<string, bool, object, string> OnResultReceived;  // from, exito, datos, convId
+    public event Action<string> OnFailureReceived;                            // convId
+    public event Action<string> OnCancellationReceived;                      // convId
+    public event Action OnTimerExpired;                                      // es el momento de intentar ser iniciador de una nueva conversación porque el timer ha expirado
 
     // Sortea el timer inicial al arrancar la escena
     void Start()
@@ -77,11 +78,11 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     protected override void ActualizarAgente()
     {
         if (timerActual <= 0f) return;
-        timerActual -= Time.deltaTime;
+        timerActual -= Time.deltaTime; // Resta el tiempo transcurrido desde el último frame
         if (timerActual <= 0f)
         {
             timerActual = 0f;
-            OnTimerInicio?.Invoke();
+            OnTimerExpired?.Invoke();
         }
     }
 
@@ -90,25 +91,25 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     // Fase 0 — pregunta a todos los esqueletos si están disponibles para participar
     public void EnviarRequest(string tarea, List<AgenteFIPAACL> destinatarios)
     {
-        timerActual = TIMER_MAX;
+        timerActual = TIMER_MAX; // pausa el timer propio: ya hay una conversación en marcha
         foreach (AgenteFIPAACL dest in destinatarios)
         {
-            if (dest == this) continue;
-            SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer;
+            if (dest == this) continue; // no se envía el REQUEST a sí mismo
+            SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer; // filtra agentes que no son guardias (ej. cámaras)
             if (skelDest == null) continue;
 
-            ACLMessage msg = CrearMensaje(REQUEST);
-            msg.content = new ContenidoRequest { tarea = tarea };
+            ACLMessage msg = CrearMensaje(REQUEST); // nuevo mensaje con GUID único como conversationId
+            msg.content = new ContentRequest { tarea = tarea };
             msg.receivers.Add(skelDest.IdAgente);
-            EnviarMensaje(msg, skelDest);
+            EnviarMensaje(msg, skelDest); // deposita el mensaje en el inbox del destinatario
         }
     }
 
     // Responde AGREE o REFUSE al iniciador según si este agente está libre
     public void ResponderRequest(string convId, bool acepto, AgenteFIPAACL iniciador)
     {
-        string performative = acepto ? AGREE : REFUSE;
-        ACLMessage msg = CrearMensaje(performative, convId);
+        string performative = acepto ? AGREE : REFUSE; // elige el performative según disponibilidad
+        ACLMessage msg = CrearMensaje(performative, convId); // reutiliza el convId del REQUEST recibido
         msg.inReplyTo = convId;
         msg.receivers.Add(iniciador.IdAgente);
         EnviarMensaje(msg, iniciador);
@@ -117,13 +118,13 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     // Fase 1 — invita a los voluntarios a participar enviando la posición del cofre
     public void EnviarCFP(string convId, List<AgenteFIPAACL> participantes, Vector3 refPos, string tarea)
     {
-        foreach (AgenteFIPAACL dest in participantes)
+        foreach (AgenteFIPAACL dest in participantes) // solo llega a los que respondieron AGREE en Fase 0
         {
             SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer;
             if (skelDest == null) continue;
 
-            ACLMessage msg = CrearMensaje(CFP, convId);
-            msg.content = new ContenidoCFP { tarea = tarea, posicionReferencia = refPos };
+            ACLMessage msg = CrearMensaje(CFP, convId); // mismo convId que el REQUEST: misma conversación
+            msg.content = new ContentCFP { tarea = tarea, posicionReferencia = refPos }; // incluye la posición del cofre para que cada uno calcule su coste
             msg.receivers.Add(skelDest.IdAgente);
             EnviarMensaje(msg, skelDest);
         }
@@ -133,7 +134,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     public void EnviarPropuesta(string convId, float coste, AgenteFIPAACL iniciador)
     {
         ACLMessage msg = CrearMensaje(PROPOSE, convId);
-        msg.content = new ContenidoPropose { coste = coste };
+        msg.content = new ContentPropose { coste = coste }; // la Deliberativa calcula el coste antes de llamar a esta función
         msg.inReplyTo = convId;
         msg.receivers.Add(iniciador.IdAgente);
         EnviarMensaje(msg, iniciador);
@@ -142,7 +143,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     // Notifica al ganador que ha sido seleccionado para ejecutar la tarea
     public void AceptarPropuesta(string convId, AgenteFIPAACL ganador)
     {
-        ACLMessage msg = CrearMensaje(ACCEPT_PROPOSAL, convId);
+        ACLMessage msg = CrearMensaje(ACCEPT_PROPOSAL, convId); // sin content: el convId identifica de qué contrato se habla
         msg.inReplyTo = convId;
         msg.receivers.Add(ganador.IdAgente);
         EnviarMensaje(msg, ganador);
@@ -151,7 +152,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     // Notifica a un candidato que no fue seleccionado
     public void RechazarPropuesta(string convId, AgenteFIPAACL perdedor)
     {
-        ACLMessage msg = CrearMensaje(REJECT_PROPOSAL, convId);
+        ACLMessage msg = CrearMensaje(REJECT_PROPOSAL, convId); // sin content: el convId es suficiente
         msg.inReplyTo = convId;
         msg.receivers.Add(perdedor.IdAgente);
         EnviarMensaje(msg, perdedor);
@@ -160,13 +161,13 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     // El ganador informa del resultado de la tarea a todos los que recibieron el REQUEST
     public void InformarResultado(string convId, bool exito, object datos, List<AgenteFIPAACL> destinatarios)
     {
-        foreach (AgenteFIPAACL dest in destinatarios)
+        foreach (AgenteFIPAACL dest in destinatarios) // notifica a todos los que participaron en la Fase 0
         {
             SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer;
             if (skelDest == null) continue;
 
             ACLMessage msg = CrearMensaje(INFORM_RESULT, convId);
-            msg.content = new ContenidoInforme { tarea = "comprobarCofre", exito = exito, datos = datos };
+            msg.content = new ContentInform { tarea = "comprobarCofre", exito = exito, datos = datos }; // exito=false significa que el cofre fue robado
             msg.inReplyTo = convId;
             msg.receivers.Add(skelDest.IdAgente);
             EnviarMensaje(msg, skelDest);
@@ -176,7 +177,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     // REFUSE genérico: rechaza participar en un CFP o REQUEST cuando el agente está ocupado
     public void Rechazar(string convId, AgenteFIPAACL destinatario)
     {
-        ACLMessage msg = CrearMensaje(REFUSE, convId);
+        ACLMessage msg = CrearMensaje(REFUSE, convId); // sin content: el convId identifica qué se rechaza
         msg.inReplyTo = convId;
         msg.receivers.Add(destinatario.IdAgente);
         EnviarMensaje(msg, destinatario);
@@ -185,7 +186,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     // El ganador no pudo completar la tarea; el iniciador lo trata como fallo
     public void Fallar(string convId, AgenteFIPAACL iniciador)
     {
-        ACLMessage msg = CrearMensaje(FAILURE, convId);
+        ACLMessage msg = CrearMensaje(FAILURE, convId); // el iniciador lo tratará igual que un INFORM_RESULT con exito=false
         msg.inReplyTo = convId;
         msg.receivers.Add(iniciador.IdAgente);
         EnviarMensaje(msg, iniciador);
@@ -199,7 +200,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
             SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer;
             if (skelDest == null) continue;
 
-            ACLMessage msg = CrearMensaje(CANCEL, convId);
+            ACLMessage msg = CrearMensaje(CANCEL, convId); // avisa a todos los comprometidos para que aborten
             msg.inReplyTo = convId;
             msg.receivers.Add(skelDest.IdAgente);
             EnviarMensaje(msg, skelDest);
@@ -213,61 +214,61 @@ public class SkeletonSocialLayer : AgenteFIPAACL
         switch (msg.performative)
         {
             case REQUEST:
-                timerActual = TIMER_MAX;
-                if (msg.content is ContenidoRequest cr)
-                    OnRequestRecibido?.Invoke(msg.sender, cr.tarea, msg.conversationId);
+                timerActual = TIMER_MAX; // hay una conversación en marcha, pausar el timer propio
+                if (msg.content is ContentRequest cr)
+                    OnRequestReceived?.Invoke(msg.sender, cr.tarea, msg.conversationId); // la Deliberativa decide si responde AGREE o REFUSE
                 else
-                    EnviarNotUnderstood(msg);
+                    EnviarNotUnderstood(msg); // el content no es del tipo esperado
                 break;
 
             case AGREE:
-                OnRespuestaRequestRecibida?.Invoke(msg.sender, true, msg.conversationId);
+                OnRequestResponseReceived?.Invoke(msg.sender, true, msg.conversationId); // este agente está disponible
                 break;
 
             case REFUSE:
-                OnRespuestaRequestRecibida?.Invoke(msg.sender, false, msg.conversationId);
+                OnRequestResponseReceived?.Invoke(msg.sender, false, msg.conversationId); // este agente está ocupado
                 break;
 
             case CFP:
-                if (msg.content is ContenidoCFP cfp)
-                    OnCFPRecibida?.Invoke(msg.sender, cfp.tarea, cfp.posicionReferencia, msg.conversationId);
+                if (msg.content is ContentCFP cfp)
+                    OnCFPReceived?.Invoke(msg.sender, cfp.tarea, cfp.posicionReferencia, msg.conversationId); // la Deliberativa calculará su coste y enviará PROPOSE
                 else
                     EnviarNotUnderstood(msg);
                 break;
 
             case PROPOSE:
-                if (msg.content is ContenidoPropose pp)
-                    OnPropuestaRecibida?.Invoke(msg.sender, pp.coste, msg.conversationId);
+                if (msg.content is ContentPropose pp)
+                    OnProposalReceived?.Invoke(msg.sender, pp.coste, msg.conversationId); // solo lo recibe el Iniciador, que acumula propuestas
                 else
                     EnviarNotUnderstood(msg);
                 break;
 
             case ACCEPT_PROPOSAL:
-                OnAceptacionRecibida?.Invoke(msg.conversationId);
+                OnProposalAccepted?.Invoke(msg.conversationId); // este agente ganó: debe ejecutar CheckChestBehaviour
                 break;
 
             case REJECT_PROPOSAL:
-                OnRechazoRecibido?.Invoke(msg.conversationId);
+                OnProposalRejected?.Invoke(msg.conversationId); // este agente perdió: vuelve a patrullar
                 break;
 
             case INFORM_RESULT:
-                if (msg.content is ContenidoInforme inf)
+                if (msg.content is ContentInform inf)
                 {
-                    if (inf.tarea == "comprobarCofre")
-                        SortearTimer();
-                    OnResultadoRecibido?.Invoke(msg.sender, inf.exito, inf.datos, msg.conversationId);
+                    if (inf.tarea == "comprobarCofre") // solo sortea timer si es el resultado del cofre, no de otros posibles INFORM_RESULT
+                        SortearTimer(); // la conversación terminó, reiniciar el contador para la próxima ronda
+                    OnResultReceived?.Invoke(msg.sender, inf.exito, inf.datos, msg.conversationId); // la Deliberativa decide si activar alerta
                 }
                 else
                     EnviarNotUnderstood(msg);
                 break;
 
             case FAILURE:
-                OnFalloRecibido?.Invoke(msg.conversationId);
+                OnFailureReceived?.Invoke(msg.conversationId); // el ganador no pudo completar la tarea
                 break;
 
             case CANCEL:
-                SortearTimer();
-                OnCancelacionRecibida?.Invoke(msg.conversationId);
+                SortearTimer(); // la conversación fue cancelada, reiniciar el timer
+                OnCancellationReceived?.Invoke(msg.conversationId); // la Deliberativa aborta CheckChestBehaviour si estaba activo
                 break;
 
             case NOT_UNDERSTOOD:
@@ -275,7 +276,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
                 break;
 
             default:
-                EnviarNotUnderstood(msg);
+                EnviarNotUnderstood(msg); // performative desconocido
                 break;
         }
     }
@@ -290,11 +291,11 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     // Si llega un mensaje con performative desconocido o content de tipo incorrecto, notifica al emisor
     private void EnviarNotUnderstood(ACLMessage msgOriginal)
     {
-        AgenteFIPAACL emisor = Todos.Find(a => a.IdAgente == msgOriginal.sender);
+        AgenteFIPAACL emisor = Todos.Find(a => a.IdAgente == msgOriginal.sender);// busca el agente emisor en la lista de agentes para enviarle la notificación de NOT_UNDERSTOOD
         if (emisor == null) return;
-        ACLMessage respuesta = CrearMensaje(NOT_UNDERSTOOD, msgOriginal.conversationId);
-        respuesta.inReplyTo = msgOriginal.conversationId;
-        respuesta.receivers.Add(emisor.IdAgente);
-        EnviarMensaje(respuesta, emisor);
+        ACLMessage respuesta = CrearMensaje(NOT_UNDERSTOOD, msgOriginal.conversationId);// mismo convId para que el emisor sepa a qué mensaje se refiere
+        respuesta.inReplyTo = msgOriginal.conversationId;// el emisor puede usar el convId para identificar qué mensaje no fue entendido
+        respuesta.receivers.Add(emisor.IdAgente); // se lo envía al emisor para que sepa que su mensaje no fue entendido
+        EnviarMensaje(respuesta, emisor); // deposita el mensaje de NOT_UNDERSTOOD en el inbox del emisor
     }
 }

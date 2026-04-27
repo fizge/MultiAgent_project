@@ -219,7 +219,9 @@ Code comments and variable names are in **Spanish** (this is an academic project
 
 ## Mejora 7b — Capa Social ✓
 
-**Implementación:** `Agent/Social/SkeletonSocialLayer.cs` hereda de `AgenteFIPAACL` y define todo el lenguaje ACL del protocolo Contract Net. Contiene las constantes de performatives, los structs de payload (`ContenidoRequest`, `ContenidoCFP`, `ContenidoPropose`, `ContenidoInforme`), la API de métodos que llama la Deliberativa (sin tocar ACLMessage), los eventos que dispara hacia la Deliberativa (sin lenguaje FIPA), y el timer aleatorio coordinado mediante `TIMER_MAX`. Los mensajes con performative desconocido o content de tipo incorrecto generan automáticamente un `NOT_UNDERSTOOD` al emisor.
+**Implementación:** `Agent/Social/SkeletonSocialLayer.cs` hereda de `AgenteFIPAACL` y define todo el lenguaje ACL del protocolo Contract Net. Contiene las constantes de performatives, los structs de payload (`ContentRequest`, `ContentCFP`, `ContentPropose`, `ContentInform`), la API de métodos que llama la Deliberativa (sin tocar ACLMessage), los eventos que dispara hacia la Deliberativa (sin lenguaje FIPA), y el timer aleatorio coordinado mediante `TIMER_MAX`. Los mensajes con performative desconocido o content de tipo incorrecto generan automáticamente un `NOT_UNDERSTOOD` al emisor.
+
+**Limitación de diseño:** `EnviarCFP` e `InformarResultado` están acopladas a la tarea `CheckChest` — `ContentCFP` solo transporta `posicionReferencia` (coste por distancia) e `InformarResultado` hardcodea `tarea = "comprobarCofre"`. Si se añadiera una nueva tarea con un coste o resultado distinto, habría que modificar estas dos funciones o añadir sobrecargas.
 
 ---
 
@@ -300,10 +302,10 @@ NOT_UNDERSTOOD, CANCEL
 
 | Struct | Usado en | Campos |
 |--------|----------|--------|
-| `ContenidoRequest` | REQUEST | `string tarea` |
-| `ContenidoCFP` | CFP | `string tarea`, `Vector3 posicionReferencia` |
-| `ContenidoPropose` | PROPOSE | `float coste` |
-| `ContenidoInforme` | INFORM_RESULT | `string tarea`, `bool exito`, `object datos` |
+| `ContentRequest` | REQUEST | `string tarea` |
+| `ContentCFP` | CFP | `string tarea`, `Vector3 posicionReferencia` |
+| `ContentPropose` | PROPOSE | `float coste` |
+| `ContentInform` | INFORM_RESULT | `string tarea`, `bool exito`, `object datos` |
 
 `AGREE`, `REFUSE`, `ACCEPT_PROPOSAL`, `REJECT_PROPOSAL`, `FAILURE`, `CANCEL` y `NOT_UNDERSTOOD` no necesitan struct propio: el performative más el `conversationId` son suficientes para identificar su significado.
 
@@ -311,13 +313,13 @@ NOT_UNDERSTOOD, CANCEL
 
 | Método | Acción interna |
 |--------|----------------|
-| `EnviarRequest(string tarea, List<AgenteFIPAACL> destinatarios)` | Crea ACLMessage(REQUEST, ContenidoRequest), pausa el timer propio a TIMER_MAX, lo envía a cada SkeletonSocialLayer en bucle `foreach` |
+| `EnviarRequest(string tarea, List<AgenteFIPAACL> destinatarios)` | Crea ACLMessage(REQUEST, ContentRequest), pausa el timer propio a TIMER_MAX, lo envía a cada SkeletonSocialLayer en bucle `foreach` |
 | `ResponderRequest(string convId, bool acepto, AgenteFIPAACL iniciador)` | Crea ACLMessage(AGREE o REFUSE) y lo envía al iniciador |
-| `EnviarCFP(string convId, List<AgenteFIPAACL> participantes, Vector3 refPos, string tarea)` | Crea ACLMessage(CFP, ContenidoCFP) y lo envía a cada participante |
-| `EnviarPropuesta(string convId, float coste, AgenteFIPAACL iniciador)` | Crea ACLMessage(PROPOSE, ContenidoPropose) y lo envía al iniciador |
+| `EnviarCFP(string convId, List<AgenteFIPAACL> participantes, Vector3 refPos, string tarea)` | Crea ACLMessage(CFP, ContentCFP) y lo envía a cada participante |
+| `EnviarPropuesta(string convId, float coste, AgenteFIPAACL iniciador)` | Crea ACLMessage(PROPOSE, ContentPropose) y lo envía al iniciador |
 | `AceptarPropuesta(string convId, AgenteFIPAACL ganador)` | Crea ACLMessage(ACCEPT_PROPOSAL) y lo envía al ganador |
 | `RechazarPropuesta(string convId, AgenteFIPAACL perdedor)` | Crea ACLMessage(REJECT_PROPOSAL) y lo envía al perdedor |
-| `InformarResultado(string convId, bool exito, object datos, List<AgenteFIPAACL> destinatarios)` | Crea ACLMessage(INFORM_RESULT, ContenidoInforme) y lo envía a cada destinatario |
+| `InformarResultado(string convId, bool exito, object datos, List<AgenteFIPAACL> destinatarios)` | Crea ACLMessage(INFORM_RESULT, ContentInform) y lo envía a cada destinatario |
 | `Rechazar(string convId, AgenteFIPAACL destinatario)` | Crea ACLMessage(REFUSE) — para rechazar un CFP o REQUEST cuando el agente está ocupado |
 | `Fallar(string convId, AgenteFIPAACL iniciador)` | Crea ACLMessage(FAILURE) y lo envía al iniciador |
 | `Cancelar(string convId, List<AgenteFIPAACL> participantes)` | Crea ACLMessage(CANCEL) y lo envía a cada participante |
@@ -326,15 +328,15 @@ NOT_UNDERSTOOD, CANCEL
 
 | Evento | Payload | Cuándo se dispara |
 |--------|---------|-------------------|
-| `OnRequestRecibido` | `string from, string tarea, string convId` | Al recibir REQUEST |
-| `OnRespuestaRequestRecibida` | `string from, bool acepto, string convId` | Al recibir AGREE o REFUSE a un REQUEST propio |
-| `OnCFPRecibida` | `string from, string tarea, Vector3 refPos, string convId` | Al recibir CFP |
-| `OnPropuestaRecibida` | `string from, float coste, string convId` | Al recibir PROPOSE |
-| `OnAceptacionRecibida` | `string convId` | Al recibir ACCEPT_PROPOSAL |
-| `OnRechazoRecibido` | `string convId` | Al recibir REJECT_PROPOSAL o REFUSE |
-| `OnResultadoRecibido` | `string from, bool exito, object datos, string convId` | Al recibir INFORM_RESULT |
-| `OnFalloRecibido` | `string convId` | Al recibir FAILURE |
-| `OnCancelacionRecibida` | `string convId` | Al recibir CANCEL |
+| `OnRequestReceived` | `string from, string tarea, string convId` | Al recibir REQUEST |
+| `OnRequestResponseReceived` | `string from, bool acepto, string convId` | Al recibir AGREE o REFUSE a un REQUEST propio |
+| `OnCFPReceived` | `string from, string tarea, Vector3 refPos, string convId` | Al recibir CFP |
+| `OnProposalReceived` | `string from, float coste, string convId` | Al recibir PROPOSE |
+| `OnProposalAccepted` | `string convId` | Al recibir ACCEPT_PROPOSAL |
+| `OnProposalRejected` | `string convId` | Al recibir REJECT_PROPOSAL o REFUSE |
+| `OnResultReceived` | `string from, bool exito, object datos, string convId` | Al recibir INFORM_RESULT |
+| `OnFailureReceived` | `string convId` | Al recibir FAILURE |
+| `OnCancellationReceived` | `string convId` | Al recibir CANCEL |
 
 **Manejo automático de errores:** si llega un mensaje con performative desconocido o `content` de tipo incorrecto, `SkeletonSocialLayer` genera y envía un `NOT_UNDERSTOOD` al emisor sin notificar a la Deliberativa. Los `NOT_UNDERSTOOD` entrantes se ignoran silenciosamente para evitar bucles.
 
@@ -343,7 +345,7 @@ NOT_UNDERSTOOD, CANCEL
 - `timerMin`, `timerMax` (configurable en Inspector, ej. 20–40 s): rango para el sorteo del timer.
 - `TIMER_MAX` (constante muy alta, ej. `9999f`): valor que efectivamente "pausa" el timer.
 - `timerActual`: se sortea en `[timerMin, timerMax]` al iniciar la escena.
-- En cada `Update()`, si `timerActual > 0` decrementa con `Time.deltaTime`. Cuando llega a `0`, avisa a la Deliberativa mediante el evento `OnTimerInicio` para que intente ser Iniciador.
+- En cada `Update()`, si `timerActual > 0` decrementa con `Time.deltaTime`. Cuando llega a `0`, avisa a la Deliberativa mediante el evento `OnTimerExpired` para que intente ser Iniciador.
 
 **Coordinación del timer mediante mensajes:**
 - Al recibir un `REQUEST` → `timerActual = TIMER_MAX` (este agente sabe que hay una conversación en marcha).
@@ -457,9 +459,9 @@ La separación de responsabilidades se mantiene: `CameraReactiveLayer` decide cu
 
 #### `CameraSocialLayer`
 
-Hereda de `AgenteFIPAACL` directamente. No participa en el protocolo Contract Net, por lo que no necesita el vocabulario completo de `SkeletonSocialLayer`. Define su propio vocabulario mínimo (constante `INFORM_RESULT` y struct `ContenidoInforme`) de forma independiente. Proporciona un único método hacia arriba:
+Hereda de `AgenteFIPAACL` directamente. No participa en el protocolo Contract Net, por lo que no necesita el vocabulario completo de `SkeletonSocialLayer`. Define su propio vocabulario mínimo (constante `INFORM_RESULT` y struct `ContentInform`) de forma independiente. Proporciona un único método hacia arriba:
 
-- `AvisarAvistamiento(Vector3 posicion)` — construye `ACLMessage(INFORM_RESULT)` con `ContenidoInforme { tarea="avistamiento", exito=true, datos=posicion }` y lo envía a cada `SkeletonSocialLayer` del registro `AgenteFIPAACL.Todos` mediante un `foreach`.
+- `AvisarAvistamiento(Vector3 posicion)` — construye `ACLMessage(INFORM_RESULT)` con `ContentInform { tarea="avistamiento", exito=true, datos=posicion }` y lo envía a cada `SkeletonSocialLayer` del registro `AgenteFIPAACL.Todos` mediante un `foreach`.
 - `ProcesarMensaje(ACLMessage msg)` — descarta cualquier mensaje entrante (las cámaras no responden a nadie en esta implementación).
 
 #### `CameraReactiveLayer`
@@ -473,7 +475,7 @@ Hereda de `AgenteFIPAACL` directamente. No participa en el protocolo Contract Ne
 
 #### Integración en los guardias
 
-Cuando un guardia recibe un `INFORM_RESULT` con `tarea="avistamiento"`, la `SkeletonSocialLayer` dispara el evento `OnResultadoRecibido`. La Deliberativa puede decidir cómo reaccionar: lo más natural es activar el mismo flujo que `InvestigateBehaviour` (ir a la posición recibida), aunque esto queda a criterio de implementación.
+Cuando un guardia recibe un `INFORM_RESULT` con `tarea="avistamiento"`, la `SkeletonSocialLayer` dispara el evento `OnResultReceived`. La Deliberativa puede decidir cómo reaccionar: lo más natural es activar el mismo flujo que `InvestigateBehaviour` (ir a la posición recibida), aunque esto queda a criterio de implementación.
 
 #### Configuración en Unity
 
@@ -507,3 +509,5 @@ No necesita NavMeshAgent (es estática), ni `NoiseEmitter`, ni `HearingSensor`.
 
 ## Mejora 9 — Añadir más comportamientos vinculados a la comunicación
 ...
+
+**Nota de implementación:** si se añaden nuevas tareas al protocolo Contract Net, habrá que modificar o sobrecargar `EnviarCFP` (para soportar costes distintos a distancia) e `InformarResultado` (para no hardcodear `tarea = "comprobarCofre"`). El resto de funciones de `SkeletonSocialLayer` son genéricas y no requieren cambios.
