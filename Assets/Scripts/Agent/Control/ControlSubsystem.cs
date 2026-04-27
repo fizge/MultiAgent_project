@@ -30,12 +30,12 @@ public class ControlSubsystem : MonoBehaviour
         // Implementamos la regla de "Inhibición": la capa reactiva (supervivencia) tiene prioridad absoluta.
         ActionProposal elegida = null;
 
-        if (propReactiva.solicitaControl) 
+        if (propReactiva != null && propReactiva.solicitaControl)
         {
             // Si la reactiva detecta una emergencia (ej. ve al ladrón), se ignora el plan de patrulla.
             elegida = propReactiva;
         }
-        else if (propDeliberativa.solicitaControl)
+        else if (propDeliberativa != null && propDeliberativa.solicitaControl)
         {
             // Si no hay amenazas, el agente sigue su plan estratégico (patrulla o vigilancia).
             elegida = propDeliberativa;

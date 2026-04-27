@@ -223,6 +223,15 @@ Code comments and variable names are in **Spanish** (this is an academic project
 
 **Limitación de diseño:** `EnviarCFP` e `InformarResultado` están acopladas a la tarea `CheckChest` — `ContentCFP` solo transporta `posicionReferencia` (coste por distancia) e `InformarResultado` hardcodea `tarea = "comprobarCofre"`. Si se añadiera una nueva tarea con un coste o resultado distinto, habría que modificar estas dos funciones o añadir sobrecargas.
 
+## Mejora 7c — Protocolo ContractNet en la Deliberativa ✓
+
+**Implementación:**
+- `Agent/Behaviours/CheckChestBehaviour.cs`: behaviour que va al cofre (a velocidad caminar) y al llegar (`MovementSensor.OnDestinoAlcanzado` con tolerancia de distancia para descartar llegadas espurias) lee `GameManager.hasLoot` y dispara `OnComprobacionCompletada(bool cofreIntacto)`. Activación/desactivación explícita por la Deliberativa.
+- `Agent/Deliberative/PatrolDeliberativeLayer.cs`: FSM completa (Iniciador + Participante) con estados `IDLE`, `INIT_WAIT_RESPONSES`, `INIT_WAIT_PROPOSALS`, `INIT_WAIT_RESULT`, `PART_VOLUNTEERED`, `PART_PROPOSED`, `PART_EXECUTING`. Cierra cada fase por número de respuestas recibidas o por `timeoutFase`. `GenerarPropuesta()` solo devuelve `ActionProposal` cuando está en `PART_EXECUTING` (delega en `CheckChestBehaviour.Evaluate()`); en cualquier otro estado devuelve `null`.
+- `Agent/Deliberative/GuardianDeliberativeLayer.cs`: FSM solo Iniciador (estados `IDLE`, `INIT_WAIT_RESPONSES`, `INIT_WAIT_PROPOSALS`, `INIT_WAIT_RESULT`). Como Participante siempre responde `REFUSE` (no puede moverse). `GenerarPropuesta()` devuelve siempre `null`.
+- `Agent/Control/ControlSubsystem.cs`: arbitraje tolerante a `null` en ambas propuestas (`if (propReactiva != null && propReactiva.solicitaControl)`).
+- Difusión final: el Iniciador, al recibir `INFORM_RESULT` del ganador, difunde el resultado a todos los destinatarios del REQUEST original más a sí mismo, de modo que `SkeletonSocialLayer` reinicie el timer de cada participante al recibir el `INFORM_RESULT` con `tarea="comprobarCofre"`.
+
 ---
 
 # Mejoras planificadas
