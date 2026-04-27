@@ -36,7 +36,7 @@ public abstract class AgenteFIPAACL : MonoBehaviour
         ActualizarAgente();
     }
 
-    // Porcesa la cola de inbox procesando como máximo mensajesPorFrame mensajes.
+    // Procesa la cola de inbox procesando como máximo mensajesPorFrame mensajes.
     // Los sobrantes esperan al frame siguiente.
     private void ProcesarInbox()
     {

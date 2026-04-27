@@ -59,7 +59,7 @@ Assets/Scripts/
 │   │   ├── SwordHitBox.cs
 │   │   └── VisionSensor.cs
 │   └── Social/                           ← [Mejora 7b] capa social (lenguaje ACL)
-│       └── GuardSocialLayer.cs
+│       └── SkeletonSocialLayer.cs
 ├── Camera/                               ← [Mejora 10] agente cámara
 │   ├── CameraReactiveLayer.cs
 │   └── CameraSocialLayer.cs
@@ -90,7 +90,7 @@ Assets/Scripts/
 | `Deliberative/GuardianDeliberativeLayer.cs` | [Mejora 7c] ídem para guardia estático |
 | `Communication/AgenteFIPAACL.cs` | [Mejora 7a] Clase padre abstracta: inbox, envío unicast, registro estático, límite msgs/frame |
 | `Communication/ACLMessage.cs` | [Mejora 7a] Contenedor de mensaje FIPA con todos sus campos |
-| `Social/GuardSocialLayer.cs` | [Mejora 7b] Hereda AgenteFIPAACL; define todo el lenguaje ACL (performatives, payloads, API traducción), timer aleatorio coordinado |
+| `Social/SkeletonSocialLayer.cs` | [Mejora 7b] Hereda AgenteFIPAACL; define todo el lenguaje ACL (performatives, payloads, API traducción), timer aleatorio coordinado |
 | `Behaviours/CheckChestBehaviour.cs` | [Mejora 7c] Behaviour que ejecuta el compromiso ContractNet: ir al cofre y comprobar estado |
 | `Camera/CameraReactiveLayer.cs` | [Mejora 10] Suscribe a VisionSensor; le indica a CameraSocialLayer que avise al detectar al ladrón |
 | `Camera/CameraSocialLayer.cs` | [Mejora 10] Hereda AgenteFIPAACL; traduce avistamiento a INFORM y lo envía a cada guardia |
@@ -215,7 +215,11 @@ Code comments and variable names are in **Spanish** (this is an academic project
 
 ## Mejora 7a — Infraestructura base de mensajería ✓
 
-**Implementación:** `Agent/Communication/ACLMessage.cs` es la clase plana con todos los campos FIPA-ACL (`performative`, `sender`, `receivers`, `content`, `conversationId`, `inReplyTo`, `protocol`, `replyBy`, `language`, `ontology`). `Agent/Communication/AgenteFIPAACL.cs` es el `MonoBehaviour` abstracto que proporciona: registro estático `Todos` (actualizado en `OnEnable`/`OnDisable`), cola `inbox` drenada en `Update` con límite `mensajesPorFrame`, envío unicast con `EnviarMensaje`, factoría `CrearMensaje` (rellena `sender` y genera GUID para `conversationId`), y hook virtual `ActualizarAgente` para que las subclases añadan lógica por frame sin sobreescribir `Update`.
+**Implementación:** `Agent/Communication/ACLMessage.cs` es la clase plana con todos los campos FIPA-ACL (`performative`, `sender`, `receivers`, `content`, `conversationId`, `inReplyTo`, `protocol`, `replyBy`). `Agent/Communication/AgenteFIPAACL.cs` es el `MonoBehaviour` abstracto que proporciona: registro estático `Todos` (actualizado en `OnEnable`/`OnDisable`), cola `inbox` drenada en `Update` con límite `mensajesPorFrame`, envío unicast con `EnviarMensaje`, factoría `CrearMensaje` (rellena `sender` y genera GUID para `conversationId`), y hook virtual `ActualizarAgente` para que las subclases añadan lógica por frame sin sobreescribir `Update`.
+
+## Mejora 7b — Capa Social ✓
+
+**Implementación:** `Agent/Social/SkeletonSocialLayer.cs` hereda de `AgenteFIPAACL` y define todo el lenguaje ACL del protocolo Contract Net. Contiene las constantes de performatives, los structs de payload (`ContenidoRequest`, `ContenidoCFP`, `ContenidoPropose`, `ContenidoInforme`), la API de métodos que llama la Deliberativa (sin tocar ACLMessage), los eventos que dispara hacia la Deliberativa (sin lenguaje FIPA), y el timer aleatorio coordinado mediante `TIMER_MAX`. Los mensajes con performative desconocido o content de tipo incorrecto generan automáticamente un `NOT_UNDERSTOOD` al emisor.
 
 ---
 
@@ -258,7 +262,7 @@ Clase de datos plana que representa un mensaje FIPA-ACL. Contiene todos los camp
 
 #### `AgenteFIPAACL`
 
-`MonoBehaviour` abstracto. Es la única clase del sistema que puede enviar y recibir mensajes. Todas las entidades comunicantes (guardias a través de su `GuardSocialLayer`, cámaras a través de su `CameraSocialLayer`) deben heredar de esta clase.
+`MonoBehaviour` abstracto. Es la única clase del sistema que puede enviar y recibir mensajes. Todas las entidades comunicantes (esqueletos a través de su `SkeletonSocialLayer`, cámaras a través de su `CameraSocialLayer`) deben heredar de esta clase.
 
 **Responsabilidades:**
 
@@ -266,20 +270,20 @@ Clase de datos plana que representa un mensaje FIPA-ACL. Contiene todos los camp
 - **Inbox:** cola `Queue<ACLMessage>` privada. Cualquier agente puede depositarle mensajes llamando a `EnviarMensaje`.
 - **Límite de procesamiento por frame:** el `Update()` de esta clase drena la cola de `inbox` procesando como máximo `mensajesPorFrame` mensajes (valor por defecto `2`, configurable en Inspector). Esto garantiza que una avalancha de mensajes no congele la pantalla. Los mensajes sobrantes esperan al frame siguiente.
 - **API de envío (sólo unicast):** `EnviarMensaje(ACLMessage msg, AgenteFIPAACL destinatario)`. Deposita el mensaje directamente en el inbox del destinatario. **No existe una versión multicast o broadcast:** quien quiera enviar a varios agentes debe hacer un `foreach` explícito desde la capa Social.
-- **Hook abstracto:** `protected abstract void ProcesarMensaje(ACLMessage msg)`. Cada subclase (`GuardSocialLayer`, `CameraSocialLayer`) implementa aquí cómo reacciona al recibir un mensaje.
+- **Hook abstracto:** `protected abstract void ProcesarMensaje(ACLMessage msg)`. Cada subclase (`SkeletonSocialLayer`, `CameraSocialLayer`) implementa aquí cómo reacciona al recibir un mensaje.
 - **Factoría de mensajes:** `CrearMensaje(string performative, string conversationId = null)` construye un `ACLMessage` con `sender` ya relleno y un `conversationId` nuevo (GUID) si no se proporciona uno.
 
 ---
 
 ### Mejora 7b — Capa Social
 
-**Fichero nuevo:** `Agent/Social/GuardSocialLayer.cs`
+**Fichero nuevo:** `Agent/Social/SkeletonSocialLayer.cs` ✓ implementado
 
 Esta subtarea define el **lenguaje** del sistema. Es la única capa que conoce FIPA-ACL: sabe qué significa `"cfp"`, cómo se estructura un `PROPOSE`, cuándo hay que responder `NOT_UNDERSTOOD`. Las capas Deliberativa y Reactiva **nunca ven un `ACLMessage`**.
 
-No existe una clase `SocialLayer` intermedia abstracta. `GuardSocialLayer` hereda directamente de `AgenteFIPAACL` y contiene en sí misma todo el vocabulario y la lógica de comunicación de los guardias. `CameraSocialLayer` también hereda directamente de `AgenteFIPAACL` con su propio vocabulario mínimo. Esta decisión evita una jerarquía intermedia artificial cuyo único contenido sería constantes y structs compartidos.
+No existe una clase `AgentLayer` intermedia abstracta. `SkeletonSocialLayer` hereda directamente de `AgenteFIPAACL` y contiene en sí misma todo el vocabulario y la lógica de comunicación de los esqueletos. `CameraSocialLayer` también hereda directamente de `AgenteFIPAACL` con su propio vocabulario mínimo. Esta decisión evita una jerarquía intermedia artificial cuyo único contenido sería constantes y structs compartidos.
 
-#### `GuardSocialLayer`
+#### `SkeletonSocialLayer`
 
 Hereda de `AgenteFIPAACL`. Contiene todo el lenguaje ACL del protocolo Contract Net y la lógica de timer coordinado.
 
@@ -292,7 +296,7 @@ INFORM_DONE, INFORM_RESULT, FAILURE,
 NOT_UNDERSTOOD, CANCEL
 ```
 
-**Payloads:** structs anidados en `GuardSocialLayer` que definen el contenido de cada tipo de mensaje que lleva datos propios:
+**Payloads:** structs definidos dentro de `SkeletonSocialLayer` que definen el contenido de cada tipo de mensaje que lleva datos propios:
 
 | Struct | Usado en | Campos |
 |--------|----------|--------|
@@ -307,16 +311,16 @@ NOT_UNDERSTOOD, CANCEL
 
 | Método | Acción interna |
 |--------|----------------|
-| `EnviarRequest(string tarea, List<AgenteFIPAACL> todos)` | Crea ACLMessage(REQUEST, ContenidoRequest), lo envía a cada agente en bucle `foreach` |
-| `ResponderRequest(string convId, bool acepto)` | Crea ACLMessage(AGREE o REFUSE) y lo envía al iniciador |
-| `EnviarCFP(string convId, List<string> participantes, Vector3 refPos)` | Crea ACLMessage(CFP, ContenidoCFP) y lo envía a cada participante |
-| `EnviarPropuesta(string convId, float coste)` | Crea ACLMessage(PROPOSE, ContenidoPropose) |
-| `AceptarPropuesta(string convId, string idGanador)` | Crea ACLMessage(ACCEPT_PROPOSAL) |
-| `RechazarPropuesta(string convId, string idPerdedor)` | Crea ACLMessage(REJECT_PROPOSAL) |
-| `InformarResultado(string convId, bool exito, object datos)` | Crea ACLMessage(INFORM_RESULT, ContenidoInforme) |
-| `Rechazar(string convId)` | Crea ACLMessage(REFUSE) — para REFUSE a CFP o REQUEST |
-| `Fallar(string convId)` | Crea ACLMessage(FAILURE) |
-| `Cancelar(string convId)` | Crea ACLMessage(CANCEL) |
+| `EnviarRequest(string tarea, List<AgenteFIPAACL> destinatarios)` | Crea ACLMessage(REQUEST, ContenidoRequest), pausa el timer propio a TIMER_MAX, lo envía a cada SkeletonSocialLayer en bucle `foreach` |
+| `ResponderRequest(string convId, bool acepto, AgenteFIPAACL iniciador)` | Crea ACLMessage(AGREE o REFUSE) y lo envía al iniciador |
+| `EnviarCFP(string convId, List<AgenteFIPAACL> participantes, Vector3 refPos, string tarea)` | Crea ACLMessage(CFP, ContenidoCFP) y lo envía a cada participante |
+| `EnviarPropuesta(string convId, float coste, AgenteFIPAACL iniciador)` | Crea ACLMessage(PROPOSE, ContenidoPropose) y lo envía al iniciador |
+| `AceptarPropuesta(string convId, AgenteFIPAACL ganador)` | Crea ACLMessage(ACCEPT_PROPOSAL) y lo envía al ganador |
+| `RechazarPropuesta(string convId, AgenteFIPAACL perdedor)` | Crea ACLMessage(REJECT_PROPOSAL) y lo envía al perdedor |
+| `InformarResultado(string convId, bool exito, object datos, List<AgenteFIPAACL> destinatarios)` | Crea ACLMessage(INFORM_RESULT, ContenidoInforme) y lo envía a cada destinatario |
+| `Rechazar(string convId, AgenteFIPAACL destinatario)` | Crea ACLMessage(REFUSE) — para rechazar un CFP o REQUEST cuando el agente está ocupado |
+| `Fallar(string convId, AgenteFIPAACL iniciador)` | Crea ACLMessage(FAILURE) y lo envía al iniciador |
+| `Cancelar(string convId, List<AgenteFIPAACL> participantes)` | Crea ACLMessage(CANCEL) y lo envía a cada participante |
 
 **API hacia arriba — eventos que la Deliberativa escucha** (instrucciones desconstruidas, sin lenguaje):
 
@@ -332,7 +336,7 @@ NOT_UNDERSTOOD, CANCEL
 | `OnFalloRecibido` | `string convId` | Al recibir FAILURE |
 | `OnCancelacionRecibida` | `string convId` | Al recibir CANCEL |
 
-**Manejo automático de errores:** si llega un mensaje con performative desconocido, `content` de tipo incorrecto, o `conversationId` que no corresponde a ninguna conversación abierta, `GuardSocialLayer` genera y envía un `NOT_UNDERSTOOD` al emisor sin notificar a la Deliberativa.
+**Manejo automático de errores:** si llega un mensaje con performative desconocido o `content` de tipo incorrecto, `SkeletonSocialLayer` genera y envía un `NOT_UNDERSTOOD` al emisor sin notificar a la Deliberativa. Los `NOT_UNDERSTOOD` entrantes se ignoran silenciosamente para evitar bucles.
 
 **Timer aleatorio coordinado:**
 
@@ -358,7 +362,7 @@ De esta forma la sincronización emerge de los propios mensajes FIPA: `REQUEST` 
 
 **Motivación (requisito de juego):** cada cierto tiempo aleatorio, uno de los guardias debe acercarse al cofre para comprobar que sigue intacto. No deben ir varios a la vez: solo el más cercano. Si el cofre ha sido robado, ese guardia avisa a todos y se activa el modo alerta; si está intacto, simplemente vuelve a patrullar. Este comportamiento se implementa íntegramente mediante el protocolo Contract Net: el timer aleatorio decide cuándo actuar, el CFP con coste = distancia al cofre decide quién va, y el INFORM_RESULT propaga el resultado a todos.
 
-Esta subtarea implementa la lógica de alto nivel del protocolo. La Deliberativa conoce el **flujo de pasos** del protocolo (sabe que después de un CFP espera propuestas, y luego acepta o rechaza), pero no conoce el lenguaje: sólo llama a métodos de `GuardSocialLayer` y escucha sus eventos.
+Esta subtarea implementa la lógica de alto nivel del protocolo. La Deliberativa conoce el **flujo de pasos** del protocolo (sabe que después de un CFP espera propuestas, y luego acepta o rechaza), pero no conoce el lenguaje: sólo llama a métodos de `SkeletonSocialLayer` y escucha sus eventos.
 
 #### Flujo completo del protocolo
 
@@ -368,7 +372,7 @@ Antes de lanzar el ContractNet, el Iniciador pregunta a todos los guardias si pu
 
 ```
 Iniciador: timerActual llega a 0
-  → social.EnviarRequest(tarea, todos los GuardSocialLayer del registro)   [bucle for]
+  → social.EnviarRequest(tarea, todos los SkeletonSocialLayer del registro)   [bucle for]
   → espera respuestas hasta replyBy
 
 Participante: recibe REQUEST
@@ -403,7 +407,7 @@ Participante ganador: recibe ACCEPT_PROPOSAL
   → la Deliberativa devuelve ActionProposal al ControlSubsystem para activar CheckChestBehaviour
 
 Participante perdedor: recibe REJECT_PROPOSAL
-  → vuelve a estado normal; GuardSocialLayer le sortea timer nuevo
+  → vuelve a estado normal; SkeletonSocialLayer le sortea timer nuevo
 
 Participante ganador: ejecuta tarea (via CheckChestBehaviour)
   → si GameManager.hasLoot == true  → social.InformarResultado(convId, exito=false, "cofre robado")
@@ -419,13 +423,13 @@ Iniciador: recibe INFORM_RESULT
       sortea timer nuevo
 
 Todos los que recibían el INFORM_RESULT de cierre:
-  → GuardSocialLayer sortea timer nuevo
+  → SkeletonSocialLayer sortea timer nuevo
 ```
 
 **Excepciones manejadas en cualquier punto:**
-- `NOT_UNDERSTOOD` lo gestiona `GuardSocialLayer` automáticamente; la Deliberativa no lo ve.
+- `NOT_UNDERSTOOD` lo gestiona `SkeletonSocialLayer` automáticamente; la Deliberativa no lo ve.
 - `FAILURE` (ganador no puede completar la tarea) → Iniciador lo trata como si hubiera recibido `INFORM_RESULT(exito=false)` con motivo de fallo.
-- `CANCEL` (Iniciador cancela) → todos los participantes en estado COMPROMETIDO abortan su tarea y vuelven a patrullar; `GuardSocialLayer` les sortea timer nuevo.
+- `CANCEL` (Iniciador cancela) → todos los participantes en estado COMPROMETIDO abortan su tarea y vuelven a patrullar; `SkeletonSocialLayer` les sortea timer nuevo.
 
 #### `CheckChestBehaviour`
 
@@ -453,9 +457,9 @@ La separación de responsabilidades se mantiene: `CameraReactiveLayer` decide cu
 
 #### `CameraSocialLayer`
 
-Hereda de `AgenteFIPAACL` directamente. No participa en el protocolo Contract Net, por lo que no necesita el vocabulario completo de `GuardSocialLayer`. Define su propio vocabulario mínimo (constante `INFORM_RESULT` y struct `ContenidoInforme`) de forma independiente. Proporciona un único método hacia arriba:
+Hereda de `AgenteFIPAACL` directamente. No participa en el protocolo Contract Net, por lo que no necesita el vocabulario completo de `SkeletonSocialLayer`. Define su propio vocabulario mínimo (constante `INFORM_RESULT` y struct `ContenidoInforme`) de forma independiente. Proporciona un único método hacia arriba:
 
-- `AvisarAvistamiento(Vector3 posicion)` — construye `ACLMessage(INFORM_RESULT)` con `ContenidoInforme { tarea="avistamiento", exito=true, datos=posicion }` y lo envía a cada `GuardSocialLayer` del registro `AgenteFIPAACL.Todos` mediante un `foreach`.
+- `AvisarAvistamiento(Vector3 posicion)` — construye `ACLMessage(INFORM_RESULT)` con `ContenidoInforme { tarea="avistamiento", exito=true, datos=posicion }` y lo envía a cada `SkeletonSocialLayer` del registro `AgenteFIPAACL.Todos` mediante un `foreach`.
 - `ProcesarMensaje(ACLMessage msg)` — descarta cualquier mensaje entrante (las cámaras no responden a nadie en esta implementación).
 
 #### `CameraReactiveLayer`
@@ -469,7 +473,7 @@ Hereda de `AgenteFIPAACL` directamente. No participa en el protocolo Contract Ne
 
 #### Integración en los guardias
 
-Cuando un guardia recibe un `INFORM_RESULT` con `tarea="avistamiento"`, la `GuardSocialLayer` dispara el evento `OnResultadoRecibido`. La Deliberativa puede decidir cómo reaccionar: lo más natural es activar el mismo flujo que `InvestigateBehaviour` (ir a la posición recibida), aunque esto queda a criterio de implementación.
+Cuando un guardia recibe un `INFORM_RESULT` con `tarea="avistamiento"`, la `SkeletonSocialLayer` dispara el evento `OnResultadoRecibido`. La Deliberativa puede decidir cómo reaccionar: lo más natural es activar el mismo flujo que `InvestigateBehaviour` (ir a la posición recibida), aunque esto queda a criterio de implementación.
 
 #### Configuración en Unity
 
@@ -488,7 +492,7 @@ No necesita NavMeshAgent (es estática), ni `NoiseEmitter`, ni `HearingSensor`.
 |--------|---------------|
 | `Communication/AgenteFIPAACL.cs` | **Nuevo** — clase padre abstracta: inbox, `EnviarMensaje` unicast, registro estático, límite msgs/frame |
 | `Communication/ACLMessage.cs` | **Nuevo** — contenedor con todos los campos FIPA-ACL |
-| `Social/GuardSocialLayer.cs` | **Nuevo** — `: AgenteFIPAACL`; todo el lenguaje ACL (performatives, payloads, API, eventos), timer coordinado via TIMER_MAX, NOT_UNDERSTOOD automático |
+| `Social/SkeletonSocialLayer.cs` | **Nuevo** ✓ — `: AgenteFIPAACL`; todo el lenguaje ACL (performatives, payloads, API, eventos), timer coordinado via TIMER_MAX, NOT_UNDERSTOOD automático |
 | `Deliberative/PatrolDeliberativeLayer.cs` | **Reescrito** — FSM completa Reclutamiento + ContractNet; sin ningún tipo de lenguaje ACL |
 | `Deliberative/GuardianDeliberativeLayer.cs` | **Reescrito** — ídem para guardia estático |
 | `Behaviours/CheckChestBehaviour.cs` | **Nuevo** — behaviour que ejecuta el compromiso ganado: ir al cofre, comprobar `hasLoot`, notificar a Deliberativa |

@@ -28,5 +28,6 @@ public class ACLMessage
 
     // Tiempo absoluto de juego (Time.time) antes del cual se espera respuesta.
     public float replyBy;
+}
 
 
