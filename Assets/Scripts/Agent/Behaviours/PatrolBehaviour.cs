@@ -1,4 +1,7 @@
 // Comportamiento de patrulla: mueve al guardia entre dos puntos calculados por escaneo de direcciones.
+// Tras la mejora 7c este behaviour solo emite ActionProposal una vez al calcular un nuevo destino;
+// en frames intermedios devuelve null para que la Deliberativa pueda gestionar el ContractNet sin
+// competir con la Reactiva (el NavMeshAgent mantiene el destino por inercia).
 using UnityEngine;
 
 public class PatrolBehaviour : IBehaviour
@@ -9,19 +12,19 @@ public class PatrolBehaviour : IBehaviour
 
     private Transform agentTransform;
     private Vector3 puntoA, puntoB, destinoActual;
-    private bool destinoAlcanzado;
+    private bool tienePropuestaPendiente;
 
     public void Initialize(VisionSensor visionSensor, MovementSensor movementSensor, Transform transform)
     {
         agentTransform = transform;
-        visionSensor.OnEscaneoCompletado += PlanificarNuevaRuta; 
-        movementSensor.OnDestinoAlcanzado += () => destinoAlcanzado = true;
+        visionSensor.OnEscaneoCompletado += PlanificarNuevaRuta;
+        movementSensor.OnDestinoAlcanzado += AlternarDestino;
     }
 
     public ActionProposal Evaluate()
     {
-        // Si el destino actual fue alcanzado, alterna al otro punto.
-        if (destinoAlcanzado) { CambiarDestino(); destinoAlcanzado = false; }
+        if (!tienePropuestaPendiente) return null;
+        tienePropuestaPendiente = false;
 
         return new ActionProposal
         {
@@ -37,7 +40,6 @@ public class PatrolBehaviour : IBehaviour
     // Recibe los datos del escaneo del sensor y calcula los puntos de patrulla.
     private void PlanificarNuevaRuta(Vector3[] direcciones, float[] distancias)
     {
-        destinoAlcanzado = false;
         puntoA = agentTransform.position;
         float maxDistancia = 0f;
         Vector3 mejorPuntoB = puntoA;
@@ -58,10 +60,14 @@ public class PatrolBehaviour : IBehaviour
 
         puntoB = mejorPuntoB;
         destinoActual = puntoB;
+        tienePropuestaPendiente = true;
     }
 
-    // Alterna el destino entre puntoA y puntoB.
-    private void CambiarDestino() =>
-        // Si el agente está cerquísima del puntoA, el destino pasa a ser el puntoB, sino, puntoA
+    // Alterna el destino entre puntoA y puntoB al llegar al actual.
+    private void AlternarDestino()
+    {
+        // Si el agente está cerquísima del puntoA, el destino pasa a ser el puntoB, sino, puntoA.
         destinoActual = (Vector3.SqrMagnitude(destinoActual - puntoA) < 0.1f) ? puntoB : puntoA;
+        tienePropuestaPendiente = true;
+    }
 }

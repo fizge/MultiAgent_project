@@ -359,30 +359,52 @@ De esta forma la sincronización emerge de los propios mensajes FIPA: `REQUEST` 
 
 ### Mejora 7c — Protocolo ContractNet en la Deliberativa
 
-**Ficheros modificados:** `Agent/Deliberative/PatrolDeliberativeLayer.cs`, `Agent/Deliberative/GuardianDeliberativeLayer.cs`
+**Ficheros modificados:** `Agent/Deliberative/PatrolDeliberativeLayer.cs`, `Agent/Deliberative/GuardianDeliberativeLayer.cs`, `Agent/Behaviours/PatrolBehaviour.cs`
 **Fichero nuevo:** `Agent/Behaviours/CheckChestBehaviour.cs`
 
 **Motivación (requisito de juego):** cada cierto tiempo aleatorio, uno de los guardias debe acercarse al cofre para comprobar que sigue intacto. No deben ir varios a la vez: solo el más cercano. Si el cofre ha sido robado, ese guardia avisa a todos y se activa el modo alerta; si está intacto, simplemente vuelve a patrullar. Este comportamiento se implementa íntegramente mediante el protocolo Contract Net: el timer aleatorio decide cuándo actuar, el CFP con coste = distancia al cofre decide quién va, y el INFORM_RESULT propaga el resultado a todos.
 
-Esta subtarea implementa la lógica de alto nivel del protocolo. La Deliberativa conoce el **flujo de pasos** del protocolo (sabe que después de un CFP espera propuestas, y luego acepta o rechaza), pero no conoce el lenguaje: sólo llama a métodos de `SkeletonSocialLayer` y escucha sus eventos.
+Esta subtarea implementa la lógica de alto nivel del protocolo. La Deliberativa conoce el **flujo de pasos** del protocolo, pero no conoce el lenguaje: solo llama a métodos de `SkeletonSocialLayer` y escucha sus eventos.
+
+#### Roles por tipo de agente
+
+**`GuardianDeliberativeLayer` — solo Iniciador**
+
+El guardia estático no puede entrar al castillo, por lo que nunca se ofrece como candidato para ir al cofre. Su único rol es iniciar la conversación y propagar el resultado. Al recibir un REQUEST de otro Iniciador, responde REFUSE directamente.
+- `GenerarPropuesta()` siempre devuelve null — el guardia no se mueve.
+- `WatchBehaviour` sigue siendo fallback permanente en la Reactiva sin cambios, ya que la comunicación corre en paralelo sin competir con el movimiento.
+
+**`PatrolDeliberativeLayer` — Iniciador y Participante**
+
+El patrullero puede tanto iniciar una conversación (si su timer expira primero) como participar en una iniciada por otro agente.
+- Como Iniciador: igual que el guardián.
+- Como Participante: responde AGREE o REFUSE al REQUEST, propone su coste si recibe CFP, ejecuta `CheckChestBehaviour` si gana.
+- `GenerarPropuesta()` devuelve `ActionProposal` hacia el cofre si está en estado EJECUTANDO, si no null.
+
+#### Cómo la Deliberativa obtiene el control (patrullero)
+
+`PatrolBehaviour` deja de ser fallback permanente. Cuando el patrullero ya tiene un destino activo y el NavMeshAgent está en camino, `PatrolBehaviour.Evaluate()` devuelve `null`. El NavMeshAgent mantiene su destino por inercia — nadie le ha dicho que pare. Al llegar (`OnDestinoAlcanzado`) o al detectar un cambio de entorno (`OnEscaneoCompletado`), `PatrolBehaviour` calcula un nuevo destino y devuelve `ActionProposal` una sola vez.
+
+Durante los frames en que `PatrolBehaviour` devuelve `null` y la Reactiva entera devuelve `null`, el `ControlSubsystem` cede a la Deliberativa, que puede gestionar la FSM del ContractNet con normalidad.
 
 #### Flujo completo del protocolo
 
-**Fase 0 — Reclutamiento (previa al ContractNet):**
-
-Antes de lanzar el ContractNet, el Iniciador pregunta a todos los guardias si pueden y quieren participar. Esto permite que guardias ocupados (persiguiendo al ladrón, ejecutando otro contrato) queden fuera de la licitación.
+**Fase 0 — Reclutamiento:**
 
 ```
-Iniciador: timerActual llega a 0
-  → social.EnviarRequest(tarea, todos los SkeletonSocialLayer del registro)   [bucle for]
+Iniciador (guardián o patrullero): timer llega a 0
+  → social.EnviarRequest(tarea, todos los SkeletonSocialLayer del registro)
   → espera respuestas hasta replyBy
 
-Participante: recibe REQUEST
+Patrullero que recibe REQUEST:
   → si está libre: social.ResponderRequest(convId, acepto=true)
   → si está ocupado: social.ResponderRequest(convId, acepto=false)
 
+Guardián que recibe REQUEST de otro Iniciador:
+  → social.ResponderRequest(convId, acepto=false)  — nunca puede ir al cofre
+
 Iniciador: recoge AGREEs y REFUSEs antes del deadline
-  → construye lista de "voluntarios" (los que dijeron AGREE)
+  → construye lista de voluntarios (solo patrulleros que dijeron AGREE)
   → si nadie aceptó: aborta, sortea timer nuevo
   → si hay voluntarios: pasa a Fase 1
 ```
@@ -391,60 +413,57 @@ Iniciador: recoge AGREEs y REFUSEs antes del deadline
 
 ```
 Iniciador:
-  → social.EnviarCFP(convId, voluntarios, posicionCofre)   [bucle for sobre voluntarios]
+  → social.EnviarCFP(convId, voluntarios, posicionCofre)
   → espera propuestas hasta replyBy
 
-Participante (voluntario): recibe CFP
+Patrullero voluntario: recibe CFP
   → calcula coste = distancia(self, posicionCofre)
   → social.EnviarPropuesta(convId, coste)
-  (si ha cambiado de estado y ya no puede: social.Rechazar(convId))
+  (si ya no puede: social.Rechazar(convId))
 
-Iniciador: recibe PROPOSEs (y REFUSEs) antes del deadline
-  → evalúa: el de menor coste (distancia) gana
-  → social.AceptarPropuesta(convId, idGanador)
-  → social.RechazarPropuesta(convId, idPerdedor)  [bucle for sobre los no ganadores]
+Iniciador: recibe PROPOSEs antes del deadline
+  → el de menor coste gana
+  → social.AceptarPropuesta(convId, ganador)
+  → social.RechazarPropuesta(convId, perdedor)  [bucle sobre los no ganadores]
 
-Participante ganador: recibe ACCEPT_PROPOSAL
-  → entra en estado COMPROMETIDO
-  → la Deliberativa devuelve ActionProposal al ControlSubsystem para activar CheckChestBehaviour
+Patrullero ganador: recibe ACCEPT_PROPOSAL
+  → entra en estado EJECUTANDO
+  → GenerarPropuesta() devuelve ActionProposal hacia el cofre
 
-Participante perdedor: recibe REJECT_PROPOSAL
-  → vuelve a estado normal; SkeletonSocialLayer le sortea timer nuevo
+Patrullero perdedor: recibe REJECT_PROPOSAL
+  → vuelve a estado normal
 
-Participante ganador: ejecuta tarea (via CheckChestBehaviour)
-  → si GameManager.hasLoot == true  → social.InformarResultado(convId, exito=false, "cofre robado")
-  → si GameManager.hasLoot == false → social.InformarResultado(convId, exito=true, "cofre intacto")
+Patrullero ganador: llega al cofre (via CheckChestBehaviour)
+  → si GameManager.hasLoot == true  → social.InformarResultado(convId, exito=false, datos="cofre robado")
+  → si GameManager.hasLoot == false → social.InformarResultado(convId, exito=true, datos="cofre intacto")
   → vuelve a patrullar
 
 Iniciador: recibe INFORM_RESULT
-  → si exito==false (cofre robado):
-      activa modo alerta global
-      envía INFORM_RESULT(alerta) a todos los que recibieron el REQUEST [bucle for]
-  → si exito==true:
-      envía INFORM_RESULT(fin) a todos los que recibieron el REQUEST [bucle for]
-      sortea timer nuevo
+  → si exito==false: envía INFORM_RESULT(alerta) a todos los del REQUEST [bucle]
+  → si exito==true:  envía INFORM_RESULT(fin) a todos los del REQUEST [bucle]
 
-Todos los que recibían el INFORM_RESULT de cierre:
+Todos los que reciben el INFORM_RESULT de cierre:
   → SkeletonSocialLayer sortea timer nuevo
 ```
 
-**Excepciones manejadas en cualquier punto:**
+**Excepciones:**
 - `NOT_UNDERSTOOD` lo gestiona `SkeletonSocialLayer` automáticamente; la Deliberativa no lo ve.
-- `FAILURE` (ganador no puede completar la tarea) → Iniciador lo trata como si hubiera recibido `INFORM_RESULT(exito=false)` con motivo de fallo.
-- `CANCEL` (Iniciador cancela) → todos los participantes en estado COMPROMETIDO abortan su tarea y vuelven a patrullar; `SkeletonSocialLayer` les sortea timer nuevo.
+- `FAILURE` → Iniciador lo trata como `INFORM_RESULT(exito=false)`.
+- `CANCEL` → patrulleros en estado EJECUTANDO abortan y vuelven a patrullar.
 
 #### `CheckChestBehaviour`
 
-Behaviour (implementa `IBehaviour`) que la Deliberativa activa cuando este agente ha ganado el contrato.
+Behaviour (implementa `IBehaviour`) que `PatrolDeliberativeLayer` activa cuando el patrullero ha ganado el contrato.
 
-- `Initialize(transform cofre, MovementSensor movSensor, DeliberativeLayer deliberativa)`.
-- En `Evaluate()`: devuelve `ActionProposal` con destino = `posiciónCofre` a velocidad de caminar mientras no se ha llegado.
-- Suscribe a `MovementSensor.OnDestinoAlcanzado`: al llegar, lee `GameManager.hasLoot`, notifica a la Deliberativa con el resultado (`bool cofreRobado`) y se desactiva.
-- La Deliberativa recoge el resultado y llama a `social.InformarResultado(...)`.
+- `Initialize(Transform cofre, MovementSensor movSensor, PatrolDeliberativeLayer deliberativa)`.
+- `Evaluate()`: devuelve `ActionProposal` con destino = posición del cofre a velocidad caminar mientras no ha llegado.
+- Suscribe a `MovementSensor.OnDestinoAlcanzado`: al llegar, lee `GameManager.hasLoot`, notifica a la Deliberativa con el resultado y se desactiva.
 
 #### Regla de prioridad con ControlSubsystem
 
-El compromiso ContractNet vive en la **Deliberativa**, por lo que la **Reactiva siempre lo puede interrumpir** (si el guardia ve al ladrón, lo persigue). Cuando la Reactiva cede de nuevo el control, la Deliberativa evalúa si el compromiso sigue activo y retoma `CheckChestBehaviour` donde lo dejó (el destino NavMesh estaba en cola y no se ha borrado).
+La Reactiva siempre puede interrumpir al patrullero comprometido (si ve al ladrón, lo persigue). Al ceder de nuevo, la Deliberativa retoma `CheckChestBehaviour` — el NavMeshAgent seguía teniendo el destino del cofre en cola.
+
+Modificarlo para que tolere nulls: if (propReactiva != null && propReactiva.solicitaControl)
 
 
 
@@ -495,14 +514,15 @@ No necesita NavMeshAgent (es estática), ni `NoiseEmitter`, ni `HearingSensor`.
 | `Communication/AgenteFIPAACL.cs` | **Nuevo** — clase padre abstracta: inbox, `EnviarMensaje` unicast, registro estático, límite msgs/frame |
 | `Communication/ACLMessage.cs` | **Nuevo** — contenedor con todos los campos FIPA-ACL |
 | `Social/SkeletonSocialLayer.cs` | **Nuevo** ✓ — `: AgenteFIPAACL`; todo el lenguaje ACL (performatives, payloads, API, eventos), timer coordinado via TIMER_MAX, NOT_UNDERSTOOD automático |
-| `Deliberative/PatrolDeliberativeLayer.cs` | **Reescrito** — FSM completa Reclutamiento + ContractNet; sin ningún tipo de lenguaje ACL |
-| `Deliberative/GuardianDeliberativeLayer.cs` | **Reescrito** — ídem para guardia estático |
+| `Deliberative/PatrolDeliberativeLayer.cs` | **Reescrito** — FSM ContractNet como Iniciador y Participante; `GenerarPropuesta()` devuelve ActionProposal al cofre en estado EJECUTANDO |
+| `Deliberative/GuardianDeliberativeLayer.cs` | **Reescrito** — solo Iniciador; responde REFUSE a cualquier REQUEST recibido; `GenerarPropuesta()` siempre null |
 | `Behaviours/CheckChestBehaviour.cs` | **Nuevo** — behaviour que ejecuta el compromiso ganado: ir al cofre, comprobar `hasLoot`, notificar a Deliberativa |
+| `Behaviours/PatrolBehaviour.cs` | **Modificado** — devuelve null cuando el NavMeshAgent ya tiene destino activo; solo devuelve ActionProposal al calcular un nuevo punto de patrulla |
 | `Camera/CameraSocialLayer.cs` | **Nuevo** — `: AgenteFIPAACL`; envía INFORM de avistamiento a cada guardia (bucle for) |
 | `Camera/CameraReactiveLayer.cs` | **Nuevo** — suscribe a VisionSensor y le indica a CameraSocialLayer cuándo avisar |
 | `Control/ControlSubsystem.cs` | **Sin cambios** |
-| `Reactive/PatrolReactiveLayer.cs` | **Sin cambios** |
-| `Reactive/GuardianReactiveLayer.cs` | **Sin cambios** |
+| `Reactive/PatrolReactiveLayer.cs` | **Sin cambios** — la cadena devuelve null de forma natural cuando PatrolBehaviour cede |
+| `Reactive/GuardianReactiveLayer.cs` | **Sin cambios** — WatchBehaviour sigue como fallback permanente |
 | `Sensors/VisionSensor.cs` | **Sin cambios** (reutilizado por las cámaras) |
 | `Sensors/HearingSensor.cs` | **Sin cambios** |
 | `Deliberative/DeliberativeLayer.cs` | **Sin cambios** (la firma abstracta sigue siendo válida) |

@@ -88,21 +88,31 @@ public class SkeletonSocialLayer : AgenteFIPAACL
 
     // API hacia arriba: métodos que llama la Deliberativa
 
-    // Fase 0 — pregunta a todos los esqueletos si están disponibles para participar
-    public void EnviarRequest(string tarea, List<AgenteFIPAACL> destinatarios)
+    // Fase 0 — pregunta a todos los esqueletos si están disponibles para participar.
+    // Devuelve el conversationId común para que la Deliberativa lo guarde y lo reutilice en fases posteriores.
+    public string EnviarRequest(string tarea, List<AgenteFIPAACL> destinatarios)
     {
         timerActual = TIMER_MAX; // pausa el timer propio: ya hay una conversación en marcha
+        string convId = Guid.NewGuid().ToString(); // un único convId compartido por todos los destinatarios
         foreach (AgenteFIPAACL dest in destinatarios)
         {
             if (dest == this) continue; // no se envía el REQUEST a sí mismo
             SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer; // filtra agentes que no son guardias (ej. cámaras)
             if (skelDest == null) continue;
 
-            ACLMessage msg = CrearMensaje(REQUEST); // nuevo mensaje con GUID único como conversationId
+            ACLMessage msg = CrearMensaje(REQUEST, convId); // todos los REQUEST comparten convId: misma conversación
             msg.content = new ContentRequest { tarea = tarea };
             msg.receivers.Add(skelDest.IdAgente);
             EnviarMensaje(msg, skelDest); // deposita el mensaje en el inbox del destinatario
         }
+        return convId;
+    }
+
+    // Reinicia el timer manualmente; usado por la Deliberativa cuando aborta una iniciativa propia
+    // (p.ej. nadie respondió AGREE) sin necesidad de generar un INFORM_RESULT artificial.
+    public void ReiniciarTimer()
+    {
+        SortearTimer();
     }
 
     // Responde AGREE o REFUSE al iniciador según si este agente está libre
