@@ -59,7 +59,6 @@ Assets/Scripts/
 │   │   ├── SwordHitBox.cs
 │   │   └── VisionSensor.cs
 │   └── Social/                           ← [Mejora 7b] capa social (lenguaje ACL)
-│       ├── SocialLayer.cs
 │       └── GuardSocialLayer.cs
 ├── Camera/                               ← [Mejora 10] agente cámara
 │   ├── CameraReactiveLayer.cs
@@ -91,8 +90,7 @@ Assets/Scripts/
 | `Deliberative/GuardianDeliberativeLayer.cs` | [Mejora 7c] ídem para guardia estático |
 | `Communication/AgenteFIPAACL.cs` | [Mejora 7a] Clase padre abstracta: inbox, envío unicast, registro estático, límite msgs/frame |
 | `Communication/ACLMessage.cs` | [Mejora 7a] Contenedor de mensaje FIPA con todos sus campos |
-| `Social/SocialLayer.cs` | [Mejora 7b] Abstracta: hereda AgenteFIPAACL; define performatives, payloads y la API de traducción ACL↔instrucciones |
-| `Social/GuardSocialLayer.cs` | [Mejora 7b] Implementación concreta para guardias; timer aleatorio coordinado |
+| `Social/GuardSocialLayer.cs` | [Mejora 7b] Hereda AgenteFIPAACL; define todo el lenguaje ACL (performatives, payloads, API traducción), timer aleatorio coordinado |
 | `Behaviours/CheckChestBehaviour.cs` | [Mejora 7c] Behaviour que ejecuta el compromiso ContractNet: ir al cofre y comprobar estado |
 | `Camera/CameraReactiveLayer.cs` | [Mejora 10] Suscribe a VisionSensor; le indica a CameraSocialLayer que avise al detectar al ladrón |
 | `Camera/CameraSocialLayer.cs` | [Mejora 10] Hereda AgenteFIPAACL; traduce avistamiento a INFORM y lo envía a cada guardia |
@@ -215,6 +213,10 @@ Code comments and variable names are in **Spanish** (this is an academic project
 
 **Implementación (6a):** `VisionSensor.ComprobarCofre()` se ejecuta cada frame. Cuando `GameManager.hasLoot == true` y el cofre está dentro de `viewDistance`, dispara `OnCofresDesaparecido` una sola vez. `WatchExitBehaviour` suscrito a ese evento corre hacia `zonaSalida` con offset aleatorio (Z solo positivo para no cruzar la puerta). Al llegar, cede el control a `PatrolBehaviour`. `VisionSensor` también suscribe a `MovementSensor.OnDestinoAlcanzado` para rescanear el entorno al llegar a cualquier destino, permitiendo que `PatrolBehaviour` calcule puntos desde la nueva posición.
 
+## Mejora 7a — Infraestructura base de mensajería ✓
+
+**Implementación:** `Agent/Communication/ACLMessage.cs` es la clase plana con todos los campos FIPA-ACL (`performative`, `sender`, `receivers`, `content`, `conversationId`, `inReplyTo`, `protocol`, `replyBy`, `language`, `ontology`). `Agent/Communication/AgenteFIPAACL.cs` es el `MonoBehaviour` abstracto que proporciona: registro estático `Todos` (actualizado en `OnEnable`/`OnDisable`), cola `inbox` drenada en `Update` con límite `mensajesPorFrame`, envío unicast con `EnviarMensaje`, factoría `CrearMensaje` (rellena `sender` y genera GUID para `conversationId`), y hook virtual `ActualizarAgente` para que las subclases añadan lógica por frame sin sobreescribir `Update`.
+
 ---
 
 # Mejoras planificadas
@@ -251,8 +253,8 @@ Clase de datos plana que representa un mensaje FIPA-ACL. Contiene todos los camp
 | `inReplyTo` | `string` | `conversationId` del mensaje al que responde, para encadenar turnos. |
 | `protocol` | `string` | Siempre `"fipa-contract-net"` en este proyecto. |
 | `replyBy` | `float` | Tiempo absoluto de juego (`Time.time`) antes del cual se espera respuesta. Usado para el deadline de CFP. |
-| `language` | `string` | Opcional. Identifica el formato del `content` (ej. `"SL"` o nombre del struct). |
-| `ontology` | `string` | Opcional. Dominio semántico del contenido (ej. `"vigilancia-cofre"`). |
+
+> **Campos FIPA omitidos — `language` y `ontology`:** el estándar los incluye para entornos heterogéneos donde agentes de distintos dominios comparten plataforma. En este proyecto no son necesarios: `language` es redundante porque el `content` siempre es un struct C# tipado (el receptor ya sabe qué esperar según el `performative`); `ontology` es redundante porque solo existe un dominio semántico (el juego). Incluirlos añadiría campos que siempre estarían vacíos y que nadie leería.
 
 #### `AgenteFIPAACL`
 
@@ -271,13 +273,15 @@ Clase de datos plana que representa un mensaje FIPA-ACL. Contiene todos los camp
 
 ### Mejora 7b — Capa Social
 
-**Ficheros nuevos:** `Agent/Social/SocialLayer.cs`, `Agent/Social/GuardSocialLayer.cs`
+**Fichero nuevo:** `Agent/Social/GuardSocialLayer.cs`
 
 Esta subtarea define el **lenguaje** del sistema. Es la única capa que conoce FIPA-ACL: sabe qué significa `"cfp"`, cómo se estructura un `PROPOSE`, cuándo hay que responder `NOT_UNDERSTOOD`. Las capas Deliberativa y Reactiva **nunca ven un `ACLMessage`**.
 
-La `SocialLayer` hereda de `AgenteFIPAACL`, convirtiéndose en el agente FIPA del guardia (no se crea ningún componente "GuardiaAgente" adicional).
+No existe una clase `SocialLayer` intermedia abstracta. `GuardSocialLayer` hereda directamente de `AgenteFIPAACL` y contiene en sí misma todo el vocabulario y la lógica de comunicación de los guardias. `CameraSocialLayer` también hereda directamente de `AgenteFIPAACL` con su propio vocabulario mínimo. Esta decisión evita una jerarquía intermedia artificial cuyo único contenido sería constantes y structs compartidos.
 
-#### `SocialLayer` (abstracta)
+#### `GuardSocialLayer`
+
+Hereda de `AgenteFIPAACL`. Contiene todo el lenguaje ACL del protocolo Contract Net y la lógica de timer coordinado.
 
 **Performatives:** constantes `string` estáticas definidas aquí, que representan todos los actos comunicativos del protocolo Contract Net:
 
@@ -288,7 +292,7 @@ INFORM_DONE, INFORM_RESULT, FAILURE,
 NOT_UNDERSTOOD, CANCEL
 ```
 
-**Payloads:** structs anidados en `SocialLayer` que definen el contenido de cada tipo de mensaje que lleva datos propios:
+**Payloads:** structs anidados en `GuardSocialLayer` que definen el contenido de cada tipo de mensaje que lleva datos propios:
 
 | Struct | Usado en | Campos |
 |--------|----------|--------|
@@ -328,11 +332,9 @@ NOT_UNDERSTOOD, CANCEL
 | `OnFalloRecibido` | `string convId` | Al recibir FAILURE |
 | `OnCancelacionRecibida` | `string convId` | Al recibir CANCEL |
 
-**Manejo automático de errores:** si llega un mensaje con performative desconocido, `content` de tipo incorrecto, o `conversationId` que no corresponde a ninguna conversación abierta, la propia `SocialLayer` genera y envía un `NOT_UNDERSTOOD` al emisor sin notificar a la Deliberativa.
+**Manejo automático de errores:** si llega un mensaje con performative desconocido, `content` de tipo incorrecto, o `conversationId` que no corresponde a ninguna conversación abierta, `GuardSocialLayer` genera y envía un `NOT_UNDERSTOOD` al emisor sin notificar a la Deliberativa.
 
-#### `GuardSocialLayer` (concreta)
-
-Hereda de `SocialLayer`. Añade la lógica del **timer aleatorio coordinado**:
+**Timer aleatorio coordinado:**
 
 - `timerMin`, `timerMax` (configurable en Inspector, ej. 20–40 s): rango para el sorteo del timer.
 - `TIMER_MAX` (constante muy alta, ej. `9999f`): valor que efectivamente "pausa" el timer.
@@ -354,7 +356,9 @@ De esta forma la sincronización emerge de los propios mensajes FIPA: `REQUEST` 
 **Ficheros modificados:** `Agent/Deliberative/PatrolDeliberativeLayer.cs`, `Agent/Deliberative/GuardianDeliberativeLayer.cs`
 **Fichero nuevo:** `Agent/Behaviours/CheckChestBehaviour.cs`
 
-Esta subtarea implementa la lógica de alto nivel del protocolo. La Deliberativa conoce el **flujo de pasos** del protocolo (sabe que después de un CFP espera propuestas, y luego acepta o rechaza), pero no conoce el lenguaje: sólo llama a métodos de la `SocialLayer` y escucha sus eventos.
+**Motivación (requisito de juego):** cada cierto tiempo aleatorio, uno de los guardias debe acercarse al cofre para comprobar que sigue intacto. No deben ir varios a la vez: solo el más cercano. Si el cofre ha sido robado, ese guardia avisa a todos y se activa el modo alerta; si está intacto, simplemente vuelve a patrullar. Este comportamiento se implementa íntegramente mediante el protocolo Contract Net: el timer aleatorio decide cuándo actuar, el CFP con coste = distancia al cofre decide quién va, y el INFORM_RESULT propaga el resultado a todos.
+
+Esta subtarea implementa la lógica de alto nivel del protocolo. La Deliberativa conoce el **flujo de pasos** del protocolo (sabe que después de un CFP espera propuestas, y luego acepta o rechaza), pero no conoce el lenguaje: sólo llama a métodos de `GuardSocialLayer` y escucha sus eventos.
 
 #### Flujo completo del protocolo
 
@@ -399,7 +403,7 @@ Participante ganador: recibe ACCEPT_PROPOSAL
   → la Deliberativa devuelve ActionProposal al ControlSubsystem para activar CheckChestBehaviour
 
 Participante perdedor: recibe REJECT_PROPOSAL
-  → vuelve a estado normal; la SocialLayer le sortea timer nuevo
+  → vuelve a estado normal; GuardSocialLayer le sortea timer nuevo
 
 Participante ganador: ejecuta tarea (via CheckChestBehaviour)
   → si GameManager.hasLoot == true  → social.InformarResultado(convId, exito=false, "cofre robado")
@@ -415,13 +419,13 @@ Iniciador: recibe INFORM_RESULT
       sortea timer nuevo
 
 Todos los que recibían el INFORM_RESULT de cierre:
-  → SocialLayer sortea timer nuevo
+  → GuardSocialLayer sortea timer nuevo
 ```
 
 **Excepciones manejadas en cualquier punto:**
-- `NOT_UNDERSTOOD` lo gestiona la Social automáticamente; la Deliberativa no lo ve.
+- `NOT_UNDERSTOOD` lo gestiona `GuardSocialLayer` automáticamente; la Deliberativa no lo ve.
 - `FAILURE` (ganador no puede completar la tarea) → Iniciador lo trata como si hubiera recibido `INFORM_RESULT(exito=false)` con motivo de fallo.
-- `CANCEL` (Iniciador cancela) → todos los participantes en estado COMPROMETIDO abortan su tarea y vuelven a patrullar; la Social les sortea timer nuevo.
+- `CANCEL` (Iniciador cancela) → todos los participantes en estado COMPROMETIDO abortan su tarea y vuelven a patrullar; `GuardSocialLayer` les sortea timer nuevo.
 
 #### `CheckChestBehaviour`
 
@@ -438,20 +442,8 @@ El compromiso ContractNet vive en la **Deliberativa**, por lo que la **Reactiva 
 
 
 
-## Mejora 8 — Revisar si el cofre ha sido robado o no
 
-**Situación actual:** La ruta de patrulla se calcula una vez al inicio (raycast al punto más lejano). Una vez se ha visto al ladrón, se persigue hasta perderlo, sitio dónde se recalcula una nueva ruta de patrulla.
-
-**Cambio deseado:**
-- Cada x cantidad de tiempo aleatorio (configurable) uno de los agentes (preferiblemente el más cercano al cofre) debe parar de patrullar y acercarse al cofre para revisar que esté en buenas condiciones. Para ello, deberá informar de que es el esqueleto más cercano, para que sólo vaya el a revisar el cofre (que no vayan 2 o más a la vez, irá el más cercano, y no siempre tiene porque ser el mismo el más cercano). Hay 2 posibilidades:
-  - Que el cofre haya sido robado, entonces, el esqueleto deberá avisar a los demás de ello y todos activan el modo "alerta".
-  - Que el cofre esté intacto, caso en el cual el guardia simplemente vuelve a su punto de patrulla anterior. 
-
-**Impacto en el código:** implementado como parte de la Mejora 7c mediante el protocolo Contract Net. El timer aleatorio de `GuardSocialLayer` dispara la Fase 0 (reclutamiento), el CFP usa la distancia al cofre como coste, el ganador ejecuta `CheckChestBehaviour`, y el resultado se propaga a todos los participantes vía `INFORM_RESULT`. Ver Mejora 7c para el flujo completo.
-
----
-
-## Mejora 10 — Cámaras de vigilancia
+## Mejora 8 — Cámaras de vigilancia
 
 **Ficheros nuevos:** `Camera/CameraReactiveLayer.cs`, `Camera/CameraSocialLayer.cs`
 
@@ -461,7 +453,7 @@ La separación de responsabilidades se mantiene: `CameraReactiveLayer` decide cu
 
 #### `CameraSocialLayer`
 
-Hereda de `AgenteFIPAACL` directamente (no pasa por `SocialLayer` de guardias, ya que no participa en Contract Net). Proporciona un único método hacia arriba:
+Hereda de `AgenteFIPAACL` directamente. No participa en el protocolo Contract Net, por lo que no necesita el vocabulario completo de `GuardSocialLayer`. Define su propio vocabulario mínimo (constante `INFORM_RESULT` y struct `ContenidoInforme`) de forma independiente. Proporciona un único método hacia arriba:
 
 - `AvisarAvistamiento(Vector3 posicion)` — construye `ACLMessage(INFORM_RESULT)` con `ContenidoInforme { tarea="avistamiento", exito=true, datos=posicion }` y lo envía a cada `GuardSocialLayer` del registro `AgenteFIPAACL.Todos` mediante un `foreach`.
 - `ProcesarMensaje(ACLMessage msg)` — descarta cualquier mensaje entrante (las cámaras no responden a nadie en esta implementación).
@@ -496,8 +488,7 @@ No necesita NavMeshAgent (es estática), ni `NoiseEmitter`, ni `HearingSensor`.
 |--------|---------------|
 | `Communication/AgenteFIPAACL.cs` | **Nuevo** — clase padre abstracta: inbox, `EnviarMensaje` unicast, registro estático, límite msgs/frame |
 | `Communication/ACLMessage.cs` | **Nuevo** — contenedor con todos los campos FIPA-ACL |
-| `Social/SocialLayer.cs` | **Nuevo** — abstracta `: AgenteFIPAACL`; performatives como constantes, structs de payload, traducción ACL↔instrucciones, NOT_UNDERSTOOD automático |
-| `Social/GuardSocialLayer.cs` | **Nuevo** — timer aleatorio coordinado via TIMER_MAX; implementa toda la API concreta de mensajería para guardias |
+| `Social/GuardSocialLayer.cs` | **Nuevo** — `: AgenteFIPAACL`; todo el lenguaje ACL (performatives, payloads, API, eventos), timer coordinado via TIMER_MAX, NOT_UNDERSTOOD automático |
 | `Deliberative/PatrolDeliberativeLayer.cs` | **Reescrito** — FSM completa Reclutamiento + ContractNet; sin ningún tipo de lenguaje ACL |
 | `Deliberative/GuardianDeliberativeLayer.cs` | **Reescrito** — ídem para guardia estático |
 | `Behaviours/CheckChestBehaviour.cs` | **Nuevo** — behaviour que ejecuta el compromiso ganado: ir al cofre, comprobar `hasLoot`, notificar a Deliberativa |
@@ -510,3 +501,5 @@ No necesita NavMeshAgent (es estática), ni `NoiseEmitter`, ni `HearingSensor`.
 | `Sensors/HearingSensor.cs` | **Sin cambios** |
 | `Deliberative/DeliberativeLayer.cs` | **Sin cambios** (la firma abstracta sigue siendo válida) |
 
+## Mejora 9 — Añadir más comportamientos vinculados a la comunicación
+...

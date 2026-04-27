@@ -27,5 +27,4 @@ UserSettings/
 # OS files
 .DS_Store
 Thumbs.db
-
-
+.claude
