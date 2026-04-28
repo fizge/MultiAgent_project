@@ -27,6 +27,7 @@ public class AttackBehaviour : IBehaviour
         return new ActionProposal
         {
             solicitaControl = true,
+            esPrioridadAlta = true,
             destinoMovimiento = sensor.PosicionLadron,
             velocidad = speed,
             aceleracion = acceleration,

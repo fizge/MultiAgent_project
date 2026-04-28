@@ -1,7 +1,6 @@
 // Comportamiento de patrulla: mueve al guardia entre dos puntos calculados por escaneo de direcciones.
-// Tras la mejora 7c este behaviour solo emite ActionProposal una vez al calcular un nuevo destino;
-// en frames intermedios devuelve null para que la Deliberativa pueda gestionar el ContractNet sin
-// competir con la Reactiva (el NavMeshAgent mantiene el destino por inercia).
+// No es de alta prioridad (esPrioridadAlta = false), por lo que el ControlSubsystem cede a la
+// Deliberativa cuando este behaviour es el único activo en la Reactiva.
 using UnityEngine;
 
 public class PatrolBehaviour : IBehaviour
@@ -12,7 +11,7 @@ public class PatrolBehaviour : IBehaviour
 
     private Transform agentTransform;
     private Vector3 puntoA, puntoB, destinoActual;
-    private bool tienePropuestaPendiente;
+    private bool tieneDestino; // flag explícito para evitar depender de Vector3.zero
 
     public void Initialize(VisionSensor visionSensor, MovementSensor movementSensor, Transform transform)
     {
@@ -23,12 +22,12 @@ public class PatrolBehaviour : IBehaviour
 
     public ActionProposal Evaluate()
     {
-        if (!tienePropuestaPendiente) return null;
-        tienePropuestaPendiente = false;
+        if (!tieneDestino) return null; // aún no se ha calculado ningún destino
 
         return new ActionProposal
         {
             solicitaControl = true,
+            esPrioridadAlta = false, // no urgente: el ControlSubsystem puede ceder a la Deliberativa
             destinoMovimiento = destinoActual,
             velocidad = speed,
             aceleracion = acceleration,
@@ -60,7 +59,7 @@ public class PatrolBehaviour : IBehaviour
 
         puntoB = mejorPuntoB;
         destinoActual = puntoB;
-        tienePropuestaPendiente = true;
+        tieneDestino = true;
     }
 
     // Alterna el destino entre puntoA y puntoB al llegar al actual.
@@ -68,6 +67,5 @@ public class PatrolBehaviour : IBehaviour
     {
         // Si el agente está cerquísima del puntoA, el destino pasa a ser el puntoB, sino, puntoA.
         destinoActual = (Vector3.SqrMagnitude(destinoActual - puntoA) < 0.1f) ? puntoB : puntoA;
-        tienePropuestaPendiente = true;
     }
 }

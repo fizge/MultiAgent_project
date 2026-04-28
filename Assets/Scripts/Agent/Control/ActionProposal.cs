@@ -4,8 +4,12 @@ using UnityEngine;
 // enviar sus propuestas de acción al Árbitro (ControlSubsystem) para que este decida cuál ejecutar.
 public class ActionProposal
 {
-    // Indica si la capa quiere tomar el mando del agente 
-    public bool solicitaControl; 
+    // Indica si la capa quiere tomar el mando del agente
+    public bool solicitaControl;
+
+    // Indica si esta propuesta es de alta prioridad (ataque, persecución, investigar, seguir guardia, vigilar salida).
+    // Si es false (patrulla o vigilancia idle), el ControlSubsystem cede primero a la Deliberativa.
+    public bool esPrioridadAlta;
     
     // Parámetros propuestos para el desplazamiento del NavMeshAgent
     public Vector3 destinoMovimiento;

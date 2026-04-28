@@ -27,18 +27,26 @@ public class ControlSubsystem : MonoBehaviour
         ActionProposal propDeliberativa = capaDeliberativa.GenerarPropuesta();
 
         // FASE DE ARBITRAJE:
-        // Implementamos la regla de "Inhibición": la capa reactiva (supervivencia) tiene prioridad absoluta.
+        // Implementamos la regla de "Inhibición" con prioridad dinámica:
+        // - Reactiva urgente (ataque, persecución...) siempre gana.
+        // - Si la reactiva solo está patrullando (no urgente), la Deliberativa puede tomar el control.
+        // - Si la Deliberativa tampoco tiene tarea, la patrulla actúa como fallback.
         ActionProposal elegida = null;
 
-        if (propReactiva != null && propReactiva.solicitaControl)
+        if (propReactiva != null && propReactiva.solicitaControl && propReactiva.esPrioridadAlta)
         {
-            // Si la reactiva detecta una emergencia (ej. ve al ladrón), se ignora el plan de patrulla.
+            // Tarea urgente: reactiva gana sin importar lo que proponga la deliberativa.
             elegida = propReactiva;
         }
         else if (propDeliberativa != null && propDeliberativa.solicitaControl)
         {
-            // Si no hay amenazas, el agente sigue su plan estratégico (patrulla o vigilancia).
+            // Sin urgencia reactiva: la deliberativa toma el control si tiene tarea pendiente.
             elegida = propDeliberativa;
+        }
+        else if (propReactiva != null && propReactiva.solicitaControl)
+        {
+            // Fallback: solo patrulla o vigilancia idle, ninguna tarea deliberativa activa.
+            elegida = propReactiva;
         }
 
         // FASE DE EJECUCIÓN:

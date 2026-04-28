@@ -26,10 +26,10 @@ public class InvestigateBehaviour : IBehaviour
         // Cede si no escuchó al ladrón o si lo ve directamente.
         if (!ladronEscuchado || ladronVisible) return null;
 
-        //Debug.Log("[InvestigateBehaviour] Investigando zona de ruido");
         return new ActionProposal
         {
             solicitaControl = true,
+            esPrioridadAlta = true,
             destinoMovimiento = posicionRuido,
             velocidad = speed,
             aceleracion = acceleration,

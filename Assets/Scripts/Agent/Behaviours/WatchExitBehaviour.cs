@@ -46,6 +46,7 @@ public class WatchExitBehaviour : IBehaviour
         return new ActionProposal
         {
             solicitaControl = true,
+            esPrioridadAlta = true,
             destinoMovimiento = destinoConOffset,
             velocidad = speed,
             aceleracion = acceleration,

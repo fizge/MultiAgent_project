@@ -29,10 +29,10 @@ public class FollowGuardBehaviour : IBehaviour
         // Cede si no escuchó al esqueleto o si tiene información directa del ladrón.
         if (!esqueletoEscuchado || ladronVisible || ladronEscuchado) return null; 
 
-        //Debug.Log("[FollowGuardBehaviour] Siguiendo a esqueleto que corre");
         return new ActionProposal
         {
             solicitaControl = true,
+            esPrioridadAlta = true,
             destinoMovimiento = posicionGuardia,
             velocidad = speed,
             aceleracion = acceleration,

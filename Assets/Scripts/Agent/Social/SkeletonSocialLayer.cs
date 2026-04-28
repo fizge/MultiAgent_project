@@ -17,6 +17,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     public const string REJECT_PROPOSAL = "reject-proposal";
     public const string INFORM_DONE = "inform-done";
     public const string INFORM_RESULT = "inform-result";
+    public const string INFORM = "inform"; // performative externo al Contract Net: el ganador notifica a todos los patrulleros
     public const string FAILURE = "failure";
     public const string NOT_UNDERSTOOD = "not-understood";
     public const string CANCEL = "cancel";
@@ -54,6 +55,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
         public string tarea;
         public bool exito;
         public object datos;
+        public override string ToString() => $"tarea={tarea}, exito={exito}, datos={datos}";
     }
 
     // Eventos hacia la Deliberativa: traducen los ACLMessage entrantes a datos sin lenguaje FIPA
@@ -64,6 +66,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
     public event Action<string> OnProposalAccepted;                       // convId
     public event Action<string> OnProposalRejected;                          // convId
     public event Action<string, bool, object, string> OnResultReceived;  // from, exito, datos, convId
+    public event Action<string, bool, object, string> OnInformReceived; // from, exito, datos, convId — externo al Contract Net
     public event Action<string> OnFailureReceived;                            // convId
     public event Action<string> OnCancellationReceived;                      // convId
     public event Action OnTimerExpired;                                      // es el momento de intentar ser iniciador de una nueva conversación porque el timer ha expirado
@@ -193,6 +196,23 @@ public class SkeletonSocialLayer : AgenteFIPAACL
         EnviarMensaje(msg, destinatario);
     }
 
+    // Notificación externa al Contract Net: el ganador avisa a todos los patrulleros del resultado.
+    // Usa INFORM (no INFORM_RESULT) para no mezclar con el protocolo Contract Net.
+    public void BroadcastInform(string convId, bool exito, object datos)
+    {
+        foreach (AgenteFIPAACL dest in Todos) // envía a todos los agentes registrados
+        {
+            if (dest == this) continue; // el ganador no se manda el mensaje a sí mismo
+            SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer;
+            if (skelDest == null) continue; // solo patrulleros (filtra cámaras y otros)
+
+            ACLMessage msg = CrearMensaje(INFORM, convId);
+            msg.content = new ContentInform { tarea = "comprobarCofre", exito = exito, datos = datos };
+            msg.receivers.Add(skelDest.IdAgente);
+            EnviarMensaje(msg, skelDest);
+        }
+    }
+
     // El ganador no pudo completar la tarea; el iniciador lo trata como fallo
     public void Fallar(string convId, AgenteFIPAACL iniciador)
     {
@@ -264,9 +284,20 @@ public class SkeletonSocialLayer : AgenteFIPAACL
             case INFORM_RESULT:
                 if (msg.content is ContentInform inf)
                 {
-                    if (inf.tarea == "comprobarCofre") // solo sortea timer si es el resultado del cofre, no de otros posibles INFORM_RESULT
-                        SortearTimer(); // la conversación terminó, reiniciar el contador para la próxima ronda
-                    OnResultReceived?.Invoke(msg.sender, inf.exito, inf.datos, msg.conversationId); // la Deliberativa decide si activar alerta
+                    if (inf.tarea == "comprobarCofre")
+                        SortearTimer(); // la conversación Contract Net terminó, reiniciar timer
+                    OnResultReceived?.Invoke(msg.sender, inf.exito, inf.datos, msg.conversationId);
+                }
+                else
+                    EnviarNotUnderstood(msg);
+                break;
+
+            case INFORM:
+                if (msg.content is ContentInform informMsg)
+                {
+                    if (informMsg.tarea == "comprobarCofre")
+                        SortearTimer(); // notificación externa: la conversación terminó, reiniciar timer
+                    OnInformReceived?.Invoke(msg.sender, informMsg.exito, informMsg.datos, msg.conversationId); // la Deliberativa reacciona al resultado
                 }
                 else
                     EnviarNotUnderstood(msg);

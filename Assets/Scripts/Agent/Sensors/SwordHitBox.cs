@@ -35,8 +35,7 @@ public class SwordHitbox : MonoBehaviour
 
         if (other.CompareTag(ladronTag))
         {
-            Debug.Log("¡El jugador ha sido alcanzado por la espada!");
-            alreadyHit = true; 
+            alreadyHit = true;
             
             // Consecuencia final: Reinicio del nivel al detectar el impacto con el Ladrón.
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);

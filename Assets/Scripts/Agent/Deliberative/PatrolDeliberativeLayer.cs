@@ -44,6 +44,9 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     // Estado del Participante
     private AgenteFIPAACL iniciadorActual;
 
+    // Flag que evita relanzar el Contract Net una vez confirmado que el cofre fue robado.
+    private bool cofreRobadoConfirmado;
+
     void Awake()
     {
         social = GetComponent<SkeletonSocialLayer>();
@@ -66,6 +69,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         social.OnProposalAccepted += OnProposalAccepted;
         social.OnProposalRejected += OnProposalRejected;
         social.OnResultReceived += OnResultReceived;
+        social.OnInformReceived += OnInformReceived;
         social.OnFailureReceived += OnFailureReceived;
         social.OnCancellationReceived += OnCancellationReceived;
     }
@@ -85,8 +89,9 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
                 FinDeRecogidaDePropuestas();
                 break;
             case Estado.INIT_WAIT_RESULT:
-                // El ganador no respondió a tiempo: lo tratamos como FAILURE.
-                BroadcastResultadoFinalYReset(false, "timeout");
+                // El ganador no respondió a tiempo: cerramos la conversación y reiniciamos timer.
+                FinalizarConversacionIniciador();
+                social.ReiniciarTimer();
                 break;
             case Estado.PART_VOLUNTEERED:
             case Estado.PART_PROPOSED:
@@ -109,6 +114,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     {
         if (estado != Estado.IDLE) return;
         if (cofre == null) return;
+        if (cofreRobadoConfirmado) return; // ya se sabe que el cofre fue robado, no tiene sentido comprobarlo de nuevo
 
         destinatariosRequest.Clear();
         foreach (AgenteFIPAACL a in AgenteFIPAACL.Todos)
@@ -213,7 +219,8 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     private void OnFailureReceived(string convId)
     {
         if (estado != Estado.INIT_WAIT_RESULT || convId != convIdActual) return;
-        BroadcastResultadoFinalYReset(false, "failure");
+        FinalizarConversacionIniciador();
+        social.ReiniciarTimer();
     }
 
     // -------------------- Participante --------------------
@@ -277,36 +284,37 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     private void OnCheckChestCompletado(bool cofreIntacto)
     {
         if (estado != Estado.PART_EXECUTING) return;
+
+        // Dentro del Contract Net: INFORM_RESULT solo al Iniciador.
         if (iniciadorActual != null)
             social.InformarResultado(convIdActual, cofreIntacto, cofreIntacto ? "cofre intacto" : "cofre robado",
                                       new List<AgenteFIPAACL> { iniciadorActual });
+
+        // Fuera del Contract Net: INFORM a todos los patrulleros (filtra cámaras y guardianes en BroadcastInform).
+        social.BroadcastInform(convIdActual, cofreIntacto, cofreIntacto ? "cofre intacto" : "cofre robado");
+
         ResetParticipante();
+        social.ReiniciarTimer(); // el ganador reinicia su timer al terminar la tarea
     }
 
     // -------------------- Resultados y reacción a la alerta --------------------
 
     private void OnResultReceived(string from, bool exito, object datos, string convId)
     {
-        // Caso 1: soy el Iniciador y el ganador me reporta su resultado.
+        // Soy el Iniciador: recibo INFORM_RESULT del ganador. Solo cierro la FSM.
+        // El ganador ya ha hecho el broadcast INFORM a todos los demás.
         if (estado == Estado.INIT_WAIT_RESULT && convId == convIdActual)
-        {
-            BroadcastResultadoFinalYReset(exito, datos);
-            return;
-        }
-
-        // Caso 2: he recibido la difusión final (estoy IDLE). Si exito=false, alerta.
-        if (!exito)
-            Debug.Log($"[{name}] ALERTA: cofre robado (conv={convId}).");
+            FinalizarConversacionIniciador();
     }
 
-    // Difunde el resultado final a todos los Participantes de la Fase 0 y a sí mismo (para que
-    // SkeletonSocialLayer reinicie el timer al recibir el INFORM_RESULT con tarea=comprobarCofre).
-    private void BroadcastResultadoFinalYReset(bool exito, object datos)
+    // Notificación externa al Contract Net: llega INFORM del ganador a todos los patrulleros.
+    private void OnInformReceived(string from, bool exito, object datos, string convId)
     {
-        List<AgenteFIPAACL> todos = new List<AgenteFIPAACL>(destinatariosRequest);
-        todos.Add(social); // el propio agente también recibe la difusión para reiniciar su timer
-        social.InformarResultado(convIdActual, exito, datos, todos);
-        FinalizarConversacionIniciador();
+        if (!exito)
+        {
+            cofreRobadoConfirmado = true; // evita relanzar el Contract Net en el futuro
+            Debug.Log($"[{name}] ALERTA: cofre robado (informado por {from}, conv={convId}).");
+        }
     }
 
     // -------------------- Helpers de transición --------------------
