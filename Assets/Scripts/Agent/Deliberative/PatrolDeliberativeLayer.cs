@@ -51,6 +51,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     {
         social = GetComponent<SkeletonSocialLayer>();
         MovementSensor mov = GetComponent<MovementSensor>();
+        VisionSensor vision = GetComponent<VisionSensor>();
 
         checkChest = new CheckChestBehaviour
         {
@@ -58,7 +59,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
             acceleration = aceleracionComprobacion,
             toleranciaCofre = toleranciaCofre
         };
-        checkChest.Initialize(transform, cofre, mov);
+        checkChest.Initialize(transform, cofre, mov, vision);
         checkChest.OnComprobacionCompletada += OnCheckChestCompletado;
 
         social.OnTimerExpired += OnTimerExpired;

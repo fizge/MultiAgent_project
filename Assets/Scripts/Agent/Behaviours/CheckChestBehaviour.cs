@@ -1,5 +1,5 @@
 // Comportamiento que ejecuta el compromiso ganado en el Contract Net: ir al cofre y comprobar
-// si sigue intacto consultando GameManager.hasLoot. Notifica el resultado a la Deliberativa
+// si sigue intacto usando VisionSensor.ComprobarEstadoCofre(). Notifica el resultado a la Deliberativa
 // mediante el callback OnComprobacionCompletada. Vive en la Deliberativa, no en la Reactiva,
 // porque solo se activa cuando el patrullero gana el contrato.
 using System;
@@ -13,15 +13,17 @@ public class CheckChestBehaviour : IBehaviour
 
     private Transform agentTransform;
     private Transform cofre;
+    private VisionSensor sensorVision;
     private bool activo;
 
     // Callback invocado al confirmar la llegada al cofre. exito=true si el cofre sigue intacto.
     public event Action<bool> OnComprobacionCompletada;
 
-    public void Initialize(Transform agentTransform, Transform cofre, MovementSensor movementSensor)
+    public void Initialize(Transform agentTransform, Transform cofre, MovementSensor movementSensor, VisionSensor visionSensor)
     {
         this.agentTransform = agentTransform;
         this.cofre = cofre;
+        this.sensorVision = visionSensor;
         movementSensor.OnDestinoAlcanzado += AlLlegar;
     }
 
@@ -55,7 +57,7 @@ public class CheckChestBehaviour : IBehaviour
         if (!activo || cofre == null || agentTransform == null) return;
         if (Vector3.Distance(agentTransform.position, cofre.position) > toleranciaCofre) return;
 
-        bool cofreIntacto = !(GameManager.Instance != null && GameManager.Instance.hasLoot);
+        bool cofreIntacto = sensorVision != null ? sensorVision.ComprobarEstadoCofre() : true;
         activo = false;
         OnComprobacionCompletada?.Invoke(cofreIntacto);
     }

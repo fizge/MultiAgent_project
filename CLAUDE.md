@@ -226,11 +226,13 @@ Code comments and variable names are in **Spanish** (this is an academic project
 ## Mejora 7c — Protocolo ContractNet en la Deliberativa ✓
 
 **Implementación:**
-- `Agent/Behaviours/CheckChestBehaviour.cs`: behaviour que va al cofre (a velocidad caminar) y al llegar (`MovementSensor.OnDestinoAlcanzado` con tolerancia de distancia para descartar llegadas espurias) lee `GameManager.hasLoot` y dispara `OnComprobacionCompletada(bool cofreIntacto)`. Activación/desactivación explícita por la Deliberativa.
+- `Agent/Behaviours/CheckChestBehaviour.cs`: behaviour que va al cofre (a velocidad caminar) y al llegar (`MovementSensor.OnDestinoAlcanzado` con tolerancia de distancia para descartar llegadas espurias) consulta `VisionSensor.ComprobarEstadoCofre()` y dispara `OnComprobacionCompletada(bool cofreIntacto)`. Activación/desactivación explícita por la Deliberativa. No accede a `GameManager` directamente — el sensor actúa de intermediario respetando la arquitectura TM.
 - `Agent/Deliberative/PatrolDeliberativeLayer.cs`: FSM completa (Iniciador + Participante) con estados `IDLE`, `INIT_WAIT_RESPONSES`, `INIT_WAIT_PROPOSALS`, `INIT_WAIT_RESULT`, `PART_VOLUNTEERED`, `PART_PROPOSED`, `PART_EXECUTING`. Cierra cada fase por número de respuestas recibidas o por `timeoutFase`. `GenerarPropuesta()` solo devuelve `ActionProposal` cuando está en `PART_EXECUTING` (delega en `CheckChestBehaviour.Evaluate()`); en cualquier otro estado devuelve `null`.
 - `Agent/Deliberative/GuardianDeliberativeLayer.cs`: FSM solo Iniciador (estados `IDLE`, `INIT_WAIT_RESPONSES`, `INIT_WAIT_PROPOSALS`, `INIT_WAIT_RESULT`). Como Participante siempre responde `REFUSE` (no puede moverse). `GenerarPropuesta()` devuelve siempre `null`.
 - `Agent/Control/ControlSubsystem.cs`: arbitraje tolerante a `null` en ambas propuestas (`if (propReactiva != null && propReactiva.solicitaControl)`).
-- Difusión final: el Iniciador, al recibir `INFORM_RESULT` del ganador, difunde el resultado a todos los destinatarios del REQUEST original más a sí mismo, de modo que `SkeletonSocialLayer` reinicie el timer de cada participante al recibir el `INFORM_RESULT` con `tarea="comprobarCofre"`.
+- Difusión final: el ganador envía `INFORM_RESULT` solo al Iniciador (Contract Net) y `INFORM` a todos los demás agentes (fuera del Contract Net). El Iniciador solo cierra su FSM al recibir `INFORM_RESULT` — no hace broadcast. `SkeletonSocialLayer` reinicia el timer al recibir cualquiera de los dos mensajes con `tarea="comprobarCofre"`.
+- `VisionSensor` tiene un nuevo método público `ComprobarEstadoCofre()` que devuelve `true` si el cofre está intacto, usado por `CheckChestBehaviour` al llegar al cofre. `VisionSensor.ComprobarCofre()` comprueba distancia + ángulo + raycast (igual que la detección del ladrón) para que solo detecten el robo los guardias que realmente tienen línea de visión al cofre.
+- `CheckChestBehaviour`: `distanciaParada = 2f`, `toleranciaCofre = 3f` — el guardia se detiene a 2 metros del cofre y esa distancia cuenta como llegada válida para evitar que se suba encima o pase de largo.
 
 ---
 

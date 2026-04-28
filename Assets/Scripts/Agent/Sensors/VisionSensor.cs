@@ -111,6 +111,8 @@ public class VisionSensor : MonoBehaviour
     }
 
     // Detecta si el guardia está mirando hacia el cofre y el botín ya fue robado.
+    // Comprueba distancia, ángulo de visión y línea de visión (raycast) para que solo lo detecten
+    // los guardias que realmente tengan el cofre en su campo de visión.
     // Se dispara una sola vez para que el behaviour reaccione sin repeticiones.
     void ComprobarCofre()
     {
@@ -118,11 +120,31 @@ public class VisionSensor : MonoBehaviour
         if (GameManager.Instance == null || !GameManager.Instance.hasLoot) return;
 
         Vector3 haciaElCofre = posicionCofre - transform.position;
-        if (haciaElCofre.magnitude > viewDistance ) return;
+
+        // Comprobación de distancia.
+        if (haciaElCofre.magnitude > viewDistance) return;
+
+        // Comprobación de ángulo: el cofre debe estar dentro del campo de visión.
+        if (Vector3.Angle(transform.forward, haciaElCofre) > viewAngle * 0.5f) return;
+
+        // Comprobación de línea de visión: no debe haber obstáculos entre el guardia y el cofre.
+        if (Physics.Raycast(eyePoint.position, haciaElCofre.normalized, haciaElCofre.magnitude, obstacleMask, QueryTriggerInteraction.Ignore)) return;
 
         cofresDesaparecidoNotificado = true;
         Debug.Log($"[VisionSensor] {name} detecta que el cofre ha desaparecido");
         OnCofresDesaparecido?.Invoke();
+    }
+
+    // Comprueba el estado del cofre cuando el guardia está cerca de él.
+    // Devuelve true si el cofre sigue intacto, false si fue robado.
+    // Usado por CheckChestBehaviour al llegar al cofre, en vez de acceder a GameManager directamente.
+    public bool ComprobarEstadoCofre()
+    {
+        Vector3 haciaElCofre = posicionCofre - transform.position;
+        if (haciaElCofre.magnitude > viewDistance) return true; // demasiado lejos para ver — asume intacto
+
+        if (GameManager.Instance == null) return true;
+        return !GameManager.Instance.hasLoot; // true = intacto, false = robado
     }
 
     // Escanea el entorno y emite OnEscaneoCompletado con los datos en bruto.

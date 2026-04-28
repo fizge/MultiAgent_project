@@ -41,8 +41,6 @@ public class WatchExitBehaviour : IBehaviour
     public ActionProposal Evaluate()
     {
         if (!cofresDesaparecido) return null; // Si el cofre no ha sido robado, no hace nada.
-
-        Debug.Log("[WatchExitBehaviour] Corriendo hacia la salida");
         return new ActionProposal
         {
             solicitaControl = true,
