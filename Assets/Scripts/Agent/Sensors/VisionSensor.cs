@@ -57,7 +57,10 @@ public class VisionSensor : MonoBehaviour
     void Start()
     {
         if (cofre != null) posicionCofre = cofre.position;
-        GetComponent<MovementSensor>().OnDestinoAlcanzado += EscanearEntorno; // Re-escanea el entorno cada vez que se alcanza un destino, para actualizar la ruta cuando llega a la zona de salida.
+        MovementSensor movSensor = GetComponent<MovementSensor>();
+
+        // Comprueba si existe MovementSensor, para evitar error cuando agente no tenga ese componente (las cámaras)
+        if (movSensor != null) movSensor.OnDestinoAlcanzado += EscanearEntorno;
         EscanearEntorno();
     }
 
@@ -116,6 +119,7 @@ public class VisionSensor : MonoBehaviour
     // Se dispara una sola vez para que el behaviour reaccione sin repeticiones.
     void ComprobarCofre()
     {
+        if (cofre == null) return; // la cámara no tiene referencia al cofre, salimos
         if (cofresDesaparecidoNotificado) return;
         if (GameManager.Instance == null || !GameManager.Instance.hasLoot) return;
 

@@ -60,8 +60,9 @@ Assets/Scripts/
 │   │   └── VisionSensor.cs
 │   └── Social/                           ← [Mejora 7b] capa social (lenguaje ACL)
 │       └── SkeletonSocialLayer.cs
-├── Camera/                               ← [Mejora 10] agente cámara
+├── Camera/                               ← [Mejora 8] agente cámara
 │   ├── CameraReactiveLayer.cs
+│   ├── CameraDeliberativeLayer.cs
 │   └── CameraSocialLayer.cs
 ├── Manager/
 │   ├── GameManager.cs
@@ -92,8 +93,9 @@ Assets/Scripts/
 | `Communication/ACLMessage.cs` | [Mejora 7a] Contenedor de mensaje FIPA con todos sus campos |
 | `Social/SkeletonSocialLayer.cs` | [Mejora 7b] Hereda AgenteFIPAACL; define todo el lenguaje ACL (performatives, payloads, API traducción), timer aleatorio coordinado |
 | `Behaviours/CheckChestBehaviour.cs` | [Mejora 7c] Behaviour que ejecuta el compromiso ContractNet: ir al cofre y comprobar estado |
-| `Camera/CameraReactiveLayer.cs` | [Mejora 10] Suscribe a VisionSensor; le indica a CameraSocialLayer que avise al detectar al ladrón |
-| `Camera/CameraSocialLayer.cs` | [Mejora 10] Hereda AgenteFIPAACL; traduce avistamiento a INFORM y lo envía a cada guardia |
+| `Camera/CameraReactiveLayer.cs` | [Mejora 8] Suscribe a VisionSensor; al detectar al ladrón activa CameraDeliberativeLayer para iniciar ContractNet |
+| `Camera/CameraDeliberativeLayer.cs` | [Mejora 8] FSM solo Iniciador; arranca cuando la Reactiva avista al ladrón; nunca propone movimiento |
+| `Camera/CameraSocialLayer.cs` | [Mejora 8] Hereda AgenteFIPAACL; vocabulario ContractNet del lado Iniciador (REQUEST, CFP, ACCEPT/REJECT_PROPOSAL) |
 | `Behaviours/IBehaviour.cs` | Interface common to all behaviours: `Evaluate() → ActionProposal?` |
 | `Behaviours/AttackBehaviour.cs` | Active when thief visible AND in range — move + attack |
 | `Behaviours/ChaseBehaviour.cs` | Active when thief visible but NOT in range — pursue |
@@ -221,7 +223,7 @@ Code comments and variable names are in **Spanish** (this is an academic project
 
 **Implementación:** `Agent/Social/SkeletonSocialLayer.cs` hereda de `AgenteFIPAACL` y define todo el lenguaje ACL del protocolo Contract Net. Contiene las constantes de performatives, los structs de payload (`ContentRequest`, `ContentCFP`, `ContentPropose`, `ContentInform`), la API de métodos que llama la Deliberativa (sin tocar ACLMessage), los eventos que dispara hacia la Deliberativa (sin lenguaje FIPA), y el timer aleatorio coordinado mediante `TIMER_MAX`. Los mensajes con performative desconocido o content de tipo incorrecto generan automáticamente un `NOT_UNDERSTOOD` al emisor.
 
-**Limitación de diseño:** `EnviarCFP` e `InformarResultado` están acopladas a la tarea `CheckChest` — `ContentCFP` solo transporta `posicionReferencia` (coste por distancia) e `InformarResultado` hardcodea `tarea = "comprobarCofre"`. Si se añadiera una nueva tarea con un coste o resultado distinto, habría que modificar estas dos funciones o añadir sobrecargas.
+**Nota de diseño:** `InformarResultado` fue ampliado en Mejora 8 para aceptar `tarea` como parámetro y enviar a cualquier `AgenteFIPAACL` sin filtrar por tipo. `BroadcastInform` también acepta `tarea` como parámetro opcional. El único método aún acoplado a una tarea concreta es `EnviarCFP`, cuyo `ContentCFP` asume que el coste se calcula por distancia a `posicionReferencia`.
 
 ## Mejora 7c — Protocolo ContractNet en la Deliberativa ✓
 
@@ -233,6 +235,12 @@ Code comments and variable names are in **Spanish** (this is an academic project
 - Difusión final: el ganador envía `INFORM_RESULT` solo al Iniciador (Contract Net) y `INFORM` a todos los demás agentes (fuera del Contract Net). El Iniciador solo cierra su FSM al recibir `INFORM_RESULT` — no hace broadcast. `SkeletonSocialLayer` reinicia el timer al recibir cualquiera de los dos mensajes con `tarea="comprobarCofre"`.
 - `VisionSensor` tiene un nuevo método público `ComprobarEstadoCofre()` que devuelve `true` si el cofre está intacto, usado por `CheckChestBehaviour` al llegar al cofre. `VisionSensor.ComprobarCofre()` comprueba distancia + ángulo + raycast (igual que la detección del ladrón) para que solo detecten el robo los guardias que realmente tienen línea de visión al cofre.
 - `CheckChestBehaviour`: `distanciaParada = 2f`, `toleranciaCofre = 3f` — el guardia se detiene a 2 metros del cofre y esa distancia cuenta como llegada válida para evitar que se suba encima o pase de largo.
+
+## Mejora 8 — Cámaras de vigilancia ✓
+
+**Implementación:** la cámara es un agente TM completo con tres capas y sin movimiento. `Camera/CameraReactiveLayer.cs` suscribe a `VisionSensor` y llama a `CameraDeliberativeLayer.IniciarProtocolo(pos)` al detectar al ladrón, una sola vez por avistamiento. `Camera/CameraDeliberativeLayer.cs` gestiona la FSM del protocolo Contract Net como Iniciador exclusivo (estados `IDLE → WAIT_RESPONSES → WAIT_PROPOSALS → WAIT_RESULT`); no hereda `DeliberativeLayer` porque la cámara no propone movimiento ni usa `ControlSubsystem`. `Camera/CameraSocialLayer.cs` hereda `AgenteFIPAACL` y usa los structs de `SkeletonSocialLayer` directamente para compatibilidad de tipos en el pattern matching.
+
+Del lado de los guardias: `PatrolDeliberativeLayer` acepta la tarea `investigarAvistamiento` además de `comprobarCofre`; al ganar activa el nuevo `GoToPositionBehaviour` con la posición recibida en el CFP; al llegar notifica a la cámara con `social.InformarResultado` y hace broadcast `INFORM` al resto de patrulleros. `GuardianDeliberativeLayer` no necesitó cambios — ya rechazaba cualquier REQUEST. `SkeletonSocialLayer` fue actualizado: `InformarResultado` unificado (sin filtro de tipo, con parámetro `tarea`), `BroadcastInform` con parámetro `tarea`, resets de timer para `investigarAvistamiento`. `VisionSensor` recibió dos null-checks para funcionar sin `MovementSensor` ni referencia al cofre.
 
 ---
 
@@ -481,40 +489,101 @@ Modificarlo para que tolere nulls: if (propReactiva != null && propReactiva.soli
 
 ## Mejora 8 — Cámaras de vigilancia
 
-**Ficheros nuevos:** `Camera/CameraReactiveLayer.cs`, `Camera/CameraSocialLayer.cs`
+**Ficheros nuevos:** `Camera/CameraReactiveLayer.cs`, `Camera/CameraDeliberativeLayer.cs`, `Camera/CameraSocialLayer.cs`
 
-Las cámaras son agentes FIPA degenerados: no tienen capas deliberativa ni de control, pero sí se comunican. Su única responsabilidad es detectar al ladrón y notificar a los guardias mediante el protocolo FIPA-ACL.
+La cámara es un agente TM completo, equivalente en estructura a los esqueletos. Tiene capa reactiva, capa deliberativa y capa social. No tiene `ControlSubsystem` ni `AgentActuator` porque no se mueve, pero ejerce el protocolo Contract Net en el rol de **Iniciador exclusivo**: nunca es participante.
 
-La separación de responsabilidades se mantiene: `CameraReactiveLayer` decide cuándo hay que avisar; `CameraSocialLayer` traduce esa decisión al lenguaje ACL.
+**Disparador reactivo:** cuando el `VisionSensor` detecta al ladrón, la `CameraReactiveLayer` notifica a la `CameraDeliberativeLayer`, que lanza inmediatamente el protocolo. A diferencia de los esqueletos, cuyo iniciador es el timer, el iniciador de la cámara es un evento de percepción.
 
-#### `CameraSocialLayer`
-
-Hereda de `AgenteFIPAACL` directamente. No participa en el protocolo Contract Net, por lo que no necesita el vocabulario completo de `SkeletonSocialLayer`. Define su propio vocabulario mínimo (constante `INFORM_RESULT` y struct `ContentInform`) de forma independiente. Proporciona un único método hacia arriba:
-
-- `AvisarAvistamiento(Vector3 posicion)` — construye `ACLMessage(INFORM_RESULT)` con `ContentInform { tarea="avistamiento", exito=true, datos=posicion }` y lo envía a cada `SkeletonSocialLayer` del registro `AgenteFIPAACL.Todos` mediante un `foreach`.
-- `ProcesarMensaje(ACLMessage msg)` — descarta cualquier mensaje entrante (las cámaras no responden a nadie en esta implementación).
+La separación de responsabilidades se mantiene igual que en los esqueletos: `CameraReactiveLayer` percibe y decide cuándo hay que actuar; `CameraDeliberativeLayer` gestiona el flujo del protocolo sin conocer ACL; `CameraSocialLayer` traduce cada paso al lenguaje FIPA.
 
 #### `CameraReactiveLayer`
 
-`MonoBehaviour` simple que actúa como la "decisión" de la cámara.
+`MonoBehaviour` que actúa como sensor de disparo.
 
 - Referencia a `VisionSensor` (el mismo componente reutilizado de los guardias, colocado en el GameObject de la cámara).
-- En `Start()` suscribe a `VisionSensor.OnLadronAvistado`.
-- Al dispararse el evento: llama a `cameraSocial.AvisarAvistamiento(sensor.PosicionLadron)`.
-- Sólo avisa **una vez por avistamiento**: rearma la suscripción al recibir `VisionSensor.OnLadronPerdido`.
+- En `Awake()` suscribe a `VisionSensor.OnLadronAvistado` y `VisionSensor.OnLadronPerdido`.
+- Al dispararse `OnLadronAvistado`: llama a `deliberativa.IniciarProtocolo(sensor.PosicionLadron)`.
+- Sólo activa el protocolo **una vez por avistamiento**: el flag `protocoloActivo` lo bloquea hasta recibir `OnLadronPerdido`. El protocolo en curso no se cancela — la deliberativa lo cierra por su cuenta.
+
+#### `CameraDeliberativeLayer`
+
+`MonoBehaviour` independiente. **No hereda de `DeliberativeLayer`** por tres razones:
+1. `DeliberativeLayer` exige implementar `GenerarPropuesta() → ActionProposal`, un contrato para proponer movimiento que la cámara nunca necesita — devolvería `null` siempre.
+2. `ControlSubsystem` no existe en la cámara: el árbitro resuelve conflictos entre movimiento reactivo y deliberativo; la cámara no tiene movimiento, así que no hay conflicto que arbitrar.
+3. El ciclo de vida es distinto: las deliberativas de los esqueletos son *preguntadas* cada frame por `ControlSubsystem`; `CameraDeliberativeLayer` es *notificada* por la reactiva al ocurrir un evento de percepción.
+
+Gestiona la FSM del protocolo Contract Net como **Iniciador exclusivo**. Conoce la secuencia de pasos del protocolo, pero no el lenguaje ACL: llama a métodos de `CameraSocialLayer` exactamente igual que `PatrolDeliberativeLayer` llama a `SkeletonSocialLayer`.
+
+**Estados FSM:**
+
+| Estado | Descripción |
+|--------|-------------|
+| `IDLE` | Esperando avistamiento. |
+| `WAIT_RESPONSES` | REQUEST enviado; esperando AGREEs y REFUSEs hasta `replyBy`. |
+| `WAIT_PROPOSALS` | CFP enviado a voluntarios; esperando PROPOSEs hasta `replyBy`. |
+| `WAIT_RESULT` | Ganador aceptado; esperando INFORM_RESULT del ejecutor (opcional; puede cerrar en WAIT_PROPOSALS). |
+
+**Lógica general:**
+
+- Al recibir `IniciarProtocolo(posicion)` desde la Reactiva: guarda la posición del avistamiento, pasa a `WAIT_RESPONSES` y llama a `social.EnviarRequest("investigarAvistamiento", todosLosEsqueletos)`.
+- En `WAIT_RESPONSES`: recoge AGREEs y REFUSEs (vía evento `OnRequestResponseReceived` de la capa social). Cierra la fase cuando ha recibido respuesta de todos los destinatarios o cuando expira `replyBy`. Si no hay voluntarios, vuelve a `IDLE`.
+- En `WAIT_PROPOSALS`: recoge PROPOSEs. Cierra al recibir todos o al expirar. Acepta el de menor coste, rechaza el resto. Pasa a `WAIT_RESULT` (o a `IDLE` si hubo 0 propuestas).
+- En `WAIT_RESULT`: espera `INFORM_RESULT` del ganador; al recibirlo (o al expirar timeout) vuelve a `IDLE`.
+- `GenerarPropuesta()` no existe: esta clase no implementa `DeliberativeLayer`. La cámara no interviene en ningún `ControlSubsystem`.
+
+**Rol Participante:** la cámara nunca responde a un REQUEST ajeno. Si `CameraSocialLayer` recibe un REQUEST, la deliberativa lo ignora (o la social responde REFUSE automáticamente).
+
+#### `CameraSocialLayer`
+
+Hereda de `AgenteFIPAACL`. Define el vocabulario del lado Iniciador del protocolo Contract Net (los performatives coinciden en valor de cadena con los de `SkeletonSocialLayer` para que los guardias los interpreten correctamente).
+
+**Performatives definidos (solo los necesarios para el Iniciador):**
+
+```
+REQUEST, CFP, ACCEPT_PROPOSAL, REJECT_PROPOSAL, REFUSE
+```
+
+**Payloads:** usa directamente los structs de `SkeletonSocialLayer` (`ContentRequest`, `ContentCFP`, `ContentPropose`, `ContentInform`). Esto es necesario para que el pattern matching en `SkeletonSocialLayer.ProcesarMensaje` funcione correctamente al recibir mensajes de la cámara — si fueran tipos distintos con los mismos campos, el `is ContentRequest` fallaría.
+
+**API hacia arriba — métodos que `CameraDeliberativeLayer` llama:**
+
+| Método | Acción interna |
+|--------|----------------|
+| `EnviarRequest(string tarea, List<AgenteFIPAACL> destinatarios)` | Crea ACLMessage(REQUEST) y lo envía a cada destinatario |
+| `EnviarCFP(string convId, List<AgenteFIPAACL> voluntarios, Vector3 posicion, string tarea)` | Crea ACLMessage(CFP, ContentCFP) y lo envía a cada voluntario |
+| `AceptarPropuesta(string convId, AgenteFIPAACL ganador)` | Crea ACLMessage(ACCEPT_PROPOSAL) y lo envía al ganador |
+| `RechazarPropuesta(string convId, AgenteFIPAACL perdedor)` | Crea ACLMessage(REJECT_PROPOSAL) y lo envía al perdedor |
+
+**API hacia arriba — eventos que `CameraDeliberativeLayer` escucha:**
+
+| Evento | Payload | Cuándo se dispara |
+|--------|---------|-------------------|
+| `OnRequestResponseReceived` | `string from, bool acepto, string convId` | Al recibir AGREE o REFUSE |
+| `OnProposalReceived` | `string from, float coste, string convId` | Al recibir PROPOSE |
+| `OnResultReceived` | `string from, bool exito, object datos, string convId` | Al recibir INFORM_RESULT del ganador |
+
+`ProcesarMensaje(ACLMessage msg)` descarta cualquier otro mensaje (NOT_UNDERSTOOD, CANCEL, etc.) o responde REFUSE si llega un REQUEST ajeno.
 
 #### Integración en los guardias
 
-Cuando un guardia recibe un `INFORM_RESULT` con `tarea="avistamiento"`, la `SkeletonSocialLayer` dispara el evento `OnResultReceived`. La Deliberativa puede decidir cómo reaccionar: lo más natural es activar el mismo flujo que `InvestigateBehaviour` (ir a la posición recibida), aunque esto queda a criterio de implementación.
+Cuando un guardia recibe un REQUEST con `tarea="investigarAvistamiento"`:
+- `PatrolDeliberativeLayer`: responde AGREE si está en `IDLE`, REFUSE si está ejecutando otra tarea. Guarda `tareaActual = "investigarAvistamiento"`. Si recibe CFP, guarda `posicionInvestigacion = refPos` y propone `coste = distancia(self, refPos)`. Si gana, activa `GoToPositionBehaviour` con esa posición. Al llegar, envía `INFORM_RESULT` a la cámara vía `social.InformarResultado` y hace broadcast `INFORM` al resto de patrulleros para que reinicien sus timers.
+- `GuardianDeliberativeLayer`: responde REFUSE siempre (ya lo hacía para cualquier REQUEST).
+
+#### `GoToPositionBehaviour`
+
+Behaviour nuevo (`Agent/Behaviours/GoToPositionBehaviour.cs`) activado por `PatrolDeliberativeLayer` al ganar el contrato `investigarAvistamiento`. Equivalente a `CheckChestBehaviour` pero para una posición `Vector3` arbitraria en vez de un `Transform` fijo. Filtra llegadas espurias por distancia igual que `CheckChestBehaviour`. Dispara `OnLlegadaCompletada` al confirmar la llegada.
 
 #### Configuración en Unity
 
 La cámara es un GameObject con:
 - `VisionSensor` (ajustar `viewDistance`, `viewAngle` e `obstacleMask` según el emplazamiento)
 - `CameraReactiveLayer`
+- `CameraDeliberativeLayer`
 - `CameraSocialLayer`
 
-No necesita NavMeshAgent (es estática), ni `NoiseEmitter`, ni `HearingSensor`.
+No necesita NavMeshAgent, `NoiseEmitter`, ni `HearingSensor`.
 
 ---
 
@@ -524,21 +593,23 @@ No necesita NavMeshAgent (es estática), ni `NoiseEmitter`, ni `HearingSensor`.
 |--------|---------------|
 | `Communication/AgenteFIPAACL.cs` | **Nuevo** — clase padre abstracta: inbox, `EnviarMensaje` unicast, registro estático, límite msgs/frame |
 | `Communication/ACLMessage.cs` | **Nuevo** — contenedor con todos los campos FIPA-ACL |
-| `Social/SkeletonSocialLayer.cs` | **Nuevo** ✓ — `: AgenteFIPAACL`; todo el lenguaje ACL (performatives, payloads, API, eventos), timer coordinado via TIMER_MAX, NOT_UNDERSTOOD automático |
-| `Deliberative/PatrolDeliberativeLayer.cs` | **Reescrito** — FSM ContractNet como Iniciador y Participante; `GenerarPropuesta()` devuelve ActionProposal al cofre en estado EJECUTANDO |
+| `Social/SkeletonSocialLayer.cs` | **Nuevo** ✓ — `: AgenteFIPAACL`; todo el lenguaje ACL (performatives, payloads, API, eventos), timer coordinado via TIMER_MAX, NOT_UNDERSTOOD automático; `InformarResultado` unificado (sin filtro de tipo, con parámetro `tarea`); `BroadcastInform` con parámetro `tarea`; resets de timer para `investigarAvistamiento` |
+| `Deliberative/PatrolDeliberativeLayer.cs` | **Reescrito** — FSM ContractNet Iniciador y Participante; maneja tareas `comprobarCofre` e `investigarAvistamiento`; activa `GoToPositionBehaviour` al ganar contrato de avistamiento |
 | `Deliberative/GuardianDeliberativeLayer.cs` | **Reescrito** — solo Iniciador; responde REFUSE a cualquier REQUEST recibido; `GenerarPropuesta()` siempre null |
 | `Behaviours/CheckChestBehaviour.cs` | **Nuevo** — behaviour que ejecuta el compromiso ganado: ir al cofre, comprobar `hasLoot`, notificar a Deliberativa |
 | `Behaviours/PatrolBehaviour.cs` | **Modificado** — devuelve null cuando el NavMeshAgent ya tiene destino activo; solo devuelve ActionProposal al calcular un nuevo punto de patrulla |
-| `Camera/CameraSocialLayer.cs` | **Nuevo** — `: AgenteFIPAACL`; envía INFORM de avistamiento a cada guardia (bucle for) |
-| `Camera/CameraReactiveLayer.cs` | **Nuevo** — suscribe a VisionSensor y le indica a CameraSocialLayer cuándo avisar |
+| `Camera/CameraReactiveLayer.cs` | **Nuevo** — suscribe a VisionSensor; activa CameraDeliberativeLayer al avistamiento |
+| `Camera/CameraDeliberativeLayer.cs` | **Nuevo** — FSM ContractNet solo Iniciador; disparado por percepción, no por timer |
+| `Camera/CameraSocialLayer.cs` | **Nuevo** — `: AgenteFIPAACL`; vocabulario Iniciador (REQUEST, CFP, ACCEPT/REJECT_PROPOSAL); usa structs de `SkeletonSocialLayer` para compatibilidad de tipos |
+| `Behaviours/GoToPositionBehaviour.cs` | **Nuevo** — behaviour que mueve a un `Vector3` arbitrario; filtra llegadas espurias por distancia; dispara `OnLlegadaCompletada` |
 | `Control/ControlSubsystem.cs` | **Sin cambios** |
 | `Reactive/PatrolReactiveLayer.cs` | **Sin cambios** — la cadena devuelve null de forma natural cuando PatrolBehaviour cede |
 | `Reactive/GuardianReactiveLayer.cs` | **Sin cambios** — WatchBehaviour sigue como fallback permanente |
-| `Sensors/VisionSensor.cs` | **Sin cambios** (reutilizado por las cámaras) |
+| `Sensors/VisionSensor.cs` | **Modificado** — null-check en `MovementSensor` (la cámara no lo tiene) y en `cofre` (la cámara no tiene referencia al cofre) |
 | `Sensors/HearingSensor.cs` | **Sin cambios** |
 | `Deliberative/DeliberativeLayer.cs` | **Sin cambios** (la firma abstracta sigue siendo válida) |
 
 ## Mejora 9 — Añadir más comportamientos vinculados a la comunicación
 ...
 
-**Nota de implementación:** si se añaden nuevas tareas al protocolo Contract Net, habrá que modificar o sobrecargar `EnviarCFP` (para soportar costes distintos a distancia) e `InformarResultado` (para no hardcodear `tarea = "comprobarCofre"`). El resto de funciones de `SkeletonSocialLayer` son genéricas y no requieren cambios.
+**Nota de implementación:** si se añaden nuevas tareas al protocolo Contract Net, `InformarResultado` ya acepta `tarea` como parámetro. El único punto que requeriría cambio es `EnviarCFP` si la nueva tarea necesitara un payload de CFP distinto a `posicionReferencia`.

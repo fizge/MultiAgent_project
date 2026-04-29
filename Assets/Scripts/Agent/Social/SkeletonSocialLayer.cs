@@ -171,19 +171,18 @@ public class SkeletonSocialLayer : AgenteFIPAACL
         EnviarMensaje(msg, perdedor);
     }
 
-    // El ganador informa del resultado de la tarea a todos los que recibieron el REQUEST
-    public void InformarResultado(string convId, bool exito, object datos, List<AgenteFIPAACL> destinatarios)
+    // El ganador informa del resultado de la tarea a los destinatarios indicados.
+    // No filtra por tipo: acepta cualquier AgenteFIPAACL (SkeletonSocialLayer, CameraSocialLayer, etc.).
+    public void InformarResultado(string convId, bool exito, object datos, string tarea, List<AgenteFIPAACL> destinatarios)
     {
-        foreach (AgenteFIPAACL dest in destinatarios) // notifica a todos los que participaron en la Fase 0
+        foreach (AgenteFIPAACL dest in destinatarios)
         {
-            SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer;
-            if (skelDest == null) continue;
-
+            if (dest == null) continue;
             ACLMessage msg = CrearMensaje(INFORM_RESULT, convId);
-            msg.content = new ContentInform { tarea = "comprobarCofre", exito = exito, datos = datos }; // exito=false significa que el cofre fue robado
+            msg.content = new ContentInform { tarea = tarea, exito = exito, datos = datos };
             msg.inReplyTo = convId;
-            msg.receivers.Add(skelDest.IdAgente);
-            EnviarMensaje(msg, skelDest);
+            msg.receivers.Add(dest.IdAgente);
+            EnviarMensaje(msg, dest);
         }
     }
 
@@ -198,16 +197,17 @@ public class SkeletonSocialLayer : AgenteFIPAACL
 
     // Notificación externa al Contract Net: el ganador avisa a todos los patrulleros del resultado.
     // Usa INFORM (no INFORM_RESULT) para no mezclar con el protocolo Contract Net.
-    public void BroadcastInform(string convId, bool exito, object datos)
+    // tarea identifica qué conversación se cerró para que los receptores puedan reiniciar su timer.
+    public void BroadcastInform(string convId, bool exito, object datos, string tarea = "comprobarCofre")
     {
-        foreach (AgenteFIPAACL dest in Todos) // envía a todos los agentes registrados
+        foreach (AgenteFIPAACL dest in Todos)
         {
-            if (dest == this) continue; // el ganador no se manda el mensaje a sí mismo
+            if (dest == this) continue;
             SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer;
             if (skelDest == null) continue; // solo patrulleros (filtra cámaras y otros)
 
             ACLMessage msg = CrearMensaje(INFORM, convId);
-            msg.content = new ContentInform { tarea = "comprobarCofre", exito = exito, datos = datos };
+            msg.content = new ContentInform { tarea = tarea, exito = exito, datos = datos };
             msg.receivers.Add(skelDest.IdAgente);
             EnviarMensaje(msg, skelDest);
         }
@@ -284,7 +284,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
             case INFORM_RESULT:
                 if (msg.content is ContentInform inf)
                 {
-                    if (inf.tarea == "comprobarCofre")
+                    if (inf.tarea == "comprobarCofre" || inf.tarea == "investigarAvistamiento")
                         SortearTimer(); // la conversación Contract Net terminó, reiniciar timer
                     OnResultReceived?.Invoke(msg.sender, inf.exito, inf.datos, msg.conversationId);
                 }
@@ -295,9 +295,9 @@ public class SkeletonSocialLayer : AgenteFIPAACL
             case INFORM:
                 if (msg.content is ContentInform informMsg)
                 {
-                    if (informMsg.tarea == "comprobarCofre")
+                    if (informMsg.tarea == "comprobarCofre" || informMsg.tarea == "investigarAvistamiento")
                         SortearTimer(); // notificación externa: la conversación terminó, reiniciar timer
-                    OnInformReceived?.Invoke(msg.sender, informMsg.exito, informMsg.datos, msg.conversationId); // la Deliberativa reacciona al resultado
+                    OnInformReceived?.Invoke(msg.sender, informMsg.exito, informMsg.datos, msg.conversationId);
                 }
                 else
                     EnviarNotUnderstood(msg);
