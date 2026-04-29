@@ -58,7 +58,7 @@ public class CameraDeliberativeLayer : MonoBehaviour
                 FinDeRecogidaDePropuestas();
                 break;
             case Estado.WAIT_RESULT:
-                // El ganador no respondió a tiempo: cerramos la conversación.
+                Debug.Log($"[{name}] Timeout esperando INFORM_RESULT, protocolo cerrado (conv={convIdActual?.Substring(0, 8)}).");
                 FinalizarConversacion();
                 break;
         }
@@ -76,9 +76,14 @@ public class CameraDeliberativeLayer : MonoBehaviour
             if (a is SkeletonSocialLayer) destinatariosRequest.Add(a);
         }
 
-        if (destinatariosRequest.Count == 0) return;
+        if (destinatariosRequest.Count == 0)
+        {
+            Debug.Log($"[{name}] No hay guardias registrados, protocolo cancelado.");
+            return;
+        }
 
         convIdActual = social.EnviarRequest(tareaAvistamiento, destinatariosRequest);
+        Debug.Log($"[{name}] REQUEST enviado a {destinatariosRequest.Count} guardia(s) (conv={convIdActual.Substring(0, 8)}).");
         voluntarios.Clear();
         respuestasEsperadas = destinatariosRequest.Count;
         respuestasRecibidas = 0;
@@ -104,10 +109,12 @@ public class CameraDeliberativeLayer : MonoBehaviour
     {
         if (voluntarios.Count == 0)
         {
+            Debug.Log($"[{name}] Ningún voluntario, protocolo abortado (conv={convIdActual.Substring(0, 8)}).");
             FinalizarConversacion();
             return;
         }
 
+        Debug.Log($"[{name}] {voluntarios.Count} voluntario(s), enviando CFP (conv={convIdActual.Substring(0, 8)}).");
         social.EnviarCFP(convIdActual, voluntarios, posicionAvistamiento, tareaAvistamiento);
         proposalAgents.Clear();
         proposalCostes.Clear();
@@ -136,6 +143,7 @@ public class CameraDeliberativeLayer : MonoBehaviour
     {
         if (proposalCostes.Count == 0)
         {
+            Debug.Log($"[{name}] Ninguna propuesta recibida, protocolo abortado (conv={convIdActual.Substring(0, 8)}).");
             FinalizarConversacion();
             return;
         }
@@ -151,6 +159,7 @@ public class CameraDeliberativeLayer : MonoBehaviour
             }
         }
 
+        Debug.Log($"[{name}] Ganador: {ganadorId} (coste={mejorCoste:F1}), ACCEPT_PROPOSAL enviado (conv={convIdActual.Substring(0, 8)}).");
         AgenteFIPAACL ganador = proposalAgents[ganadorId];
         social.AceptarPropuesta(convIdActual, ganador);
         foreach (KeyValuePair<string, AgenteFIPAACL> kv in proposalAgents)
@@ -163,6 +172,7 @@ public class CameraDeliberativeLayer : MonoBehaviour
     private void OnResultReceived(string from, bool exito, object datos, string convId)
     {
         if (convId != convIdActual) return;
+        Debug.Log($"[{name}] Investigación completada por {from} (conv={convId.Substring(0, 8)}), protocolo cerrado.");
         FinalizarConversacion();
     }
 

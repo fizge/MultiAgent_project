@@ -218,4 +218,29 @@ public class VisionSensor : MonoBehaviour
         if (ladron != null) return ladron.position;
         return Vector3.zero;
     }
+
+    // Dibuja el cono de visión en la Scene view cuando el GameObject está seleccionado.
+    void OnDrawGizmosSelected()
+    {
+        Vector3 origen = eyePoint != null ? eyePoint.position : transform.position;
+        float semiAngulo = viewAngle * 0.5f;
+
+        Gizmos.color = Color.yellow;
+        Vector3 izquierda = Quaternion.Euler(0, -semiAngulo, 0) * transform.forward;
+        Vector3 derecha   = Quaternion.Euler(0,  semiAngulo, 0) * transform.forward;
+        Gizmos.DrawRay(origen, transform.forward * viewDistance);
+        Gizmos.DrawRay(origen, izquierda * viewDistance);
+        Gizmos.DrawRay(origen, derecha   * viewDistance);
+
+        int segmentos = 24;
+        Vector3 puntoAnterior = origen + izquierda * viewDistance;
+        for (int i = 1; i <= segmentos; i++)
+        {
+            float angulo = -semiAngulo + viewAngle * (i / (float)segmentos);
+            Vector3 dir = Quaternion.Euler(0, angulo, 0) * transform.forward;
+            Vector3 puntoActual = origen + dir * viewDistance;
+            Gizmos.DrawLine(puntoAnterior, puntoActual);
+            puntoAnterior = puntoActual;
+        }
+    }
 }

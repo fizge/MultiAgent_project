@@ -20,15 +20,15 @@ public class CameraReactiveLayer : MonoBehaviour
 
     private void OnLadronAvistado()
     {
-        if (protocoloActivo) return; 
+        if (protocoloActivo) return;
         protocoloActivo = true;
+        Debug.Log($"[{name}] Ladrón avistado en {sensor.PosicionLadron}, iniciando ContractNet.");
         deliberativa.IniciarProtocolo(sensor.PosicionLadron);
     }
 
     private void OnLadronPerdido()
     {
-        // Permite relanzar el protocolo en el próximo avistamiento.
-        // El protocolo en curso sigue su curso hasta que la deliberativa lo cierre.
+        Debug.Log($"[{name}] Ladrón perdido de vista.");
         protocoloActivo = false;
     }
 }
