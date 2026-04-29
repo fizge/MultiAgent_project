@@ -61,7 +61,7 @@ Assets/Scripts/
 │   └── Social/                           ← [Mejora 7b] capa social (lenguaje ACL)
 │       └── SkeletonSocialLayer.cs
 ├── Camera/                               ← [Mejora 8] agente cámara
-│   ├── CameraReactiveLayer.cs
+│   ├── CameraSensor.cs
 │   ├── CameraDeliberativeLayer.cs
 │   └── CameraSocialLayer.cs
 ├── Manager/
@@ -93,8 +93,8 @@ Assets/Scripts/
 | `Communication/ACLMessage.cs` | [Mejora 7a] Contenedor de mensaje FIPA con todos sus campos |
 | `Social/SkeletonSocialLayer.cs` | [Mejora 7b] Hereda AgenteFIPAACL; define todo el lenguaje ACL (performatives, payloads, API traducción), timer aleatorio coordinado |
 | `Behaviours/CheckChestBehaviour.cs` | [Mejora 7c] Behaviour que ejecuta el compromiso ContractNet: ir al cofre y comprobar estado |
-| `Camera/CameraReactiveLayer.cs` | [Mejora 8] Suscribe a VisionSensor; al detectar al ladrón activa CameraDeliberativeLayer para iniciar ContractNet |
-| `Camera/CameraDeliberativeLayer.cs` | [Mejora 8] FSM solo Iniciador; arranca cuando la Reactiva avista al ladrón; nunca propone movimiento |
+| `Camera/CameraSensor.cs` | [Mejora 8] Sensor simplificado exclusivo para cámaras: detecta al ladrón, dispara OnLadronAvistado/OnLadronPerdido; sin lógica de cofre, rejas ni NavMesh |
+| `Camera/CameraDeliberativeLayer.cs` | [Mejora 8] FSM solo Iniciador; suscribe directamente a CameraSensor; gestiona el protocolo ContractNet sin capa reactiva; nunca propone movimiento |
 | `Camera/CameraSocialLayer.cs` | [Mejora 8] Hereda AgenteFIPAACL; vocabulario ContractNet del lado Iniciador (REQUEST, CFP, ACCEPT/REJECT_PROPOSAL) |
 | `Behaviours/IBehaviour.cs` | Interface common to all behaviours: `Evaluate() → ActionProposal?` |
 | `Behaviours/AttackBehaviour.cs` | Active when thief visible AND in range — move + attack |
@@ -238,9 +238,9 @@ Code comments and variable names are in **Spanish** (this is an academic project
 
 ## Mejora 8 — Cámaras de vigilancia ✓
 
-**Implementación:** la cámara es un agente TM completo con tres capas y sin movimiento. `Camera/CameraReactiveLayer.cs` suscribe a `VisionSensor` y llama a `CameraDeliberativeLayer.IniciarProtocolo(pos)` al detectar al ladrón, una sola vez por avistamiento. `Camera/CameraDeliberativeLayer.cs` gestiona la FSM del protocolo Contract Net como Iniciador exclusivo (estados `IDLE → WAIT_RESPONSES → WAIT_PROPOSALS → WAIT_RESULT`); no hereda `DeliberativeLayer` porque la cámara no propone movimiento ni usa `ControlSubsystem`. `Camera/CameraSocialLayer.cs` hereda `AgenteFIPAACL` y usa los structs de `SkeletonSocialLayer` directamente para compatibilidad de tipos en el pattern matching.
+**Implementación:** la cámara es un agente TM con dos capas activas y sin movimiento. No tiene capa reactiva: la cámara no ejecuta behaviours propios, por lo que la separación reactiva/deliberativa no aporta valor y se elimina. `Camera/CameraSensor.cs` es un sensor simplificado exclusivo para cámaras (sin lógica de cofre, rejas ni NavMesh) que dispara `OnLadronAvistado`/`OnLadronPerdido`. `Camera/CameraDeliberativeLayer.cs` suscribe directamente a `CameraSensor`, gestiona el flag `protocoloActivo` y lanza el protocolo Contract Net como Iniciador exclusivo (estados `IDLE → WAIT_RESPONSES → WAIT_PROPOSALS → WAIT_RESULT`); no hereda `DeliberativeLayer` porque la cámara no propone movimiento ni usa `ControlSubsystem`. `Camera/CameraSocialLayer.cs` hereda `AgenteFIPAACL` y usa los structs de `SkeletonSocialLayer` directamente para compatibilidad de tipos en el pattern matching.
 
-Del lado de los guardias: `PatrolDeliberativeLayer` acepta la tarea `investigarAvistamiento` además de `comprobarCofre`; al ganar activa el nuevo `GoToPositionBehaviour` con la posición recibida en el CFP; al llegar notifica a la cámara con `social.InformarResultado` y hace broadcast `INFORM` al resto de patrulleros. `GuardianDeliberativeLayer` no necesitó cambios — ya rechazaba cualquier REQUEST. `SkeletonSocialLayer` fue actualizado: `InformarResultado` unificado (sin filtro de tipo, con parámetro `tarea`), `BroadcastInform` con parámetro `tarea`, resets de timer para `investigarAvistamiento`. `VisionSensor` recibió dos null-checks para funcionar sin `MovementSensor` ni referencia al cofre.
+Del lado de los guardias: `PatrolDeliberativeLayer` acepta la tarea `investigarAvistamiento` además de `comprobarCofre`; al ganar activa el nuevo `GoToPositionBehaviour` con la posición recibida en el CFP; al llegar notifica a la cámara con `social.InformarResultado` y hace broadcast `INFORM` al resto de patrulleros. `GuardianDeliberativeLayer` no necesitó cambios — ya rechazaba cualquier REQUEST. `SkeletonSocialLayer` fue actualizado: `InformarResultado` unificado (sin filtro de tipo, con parámetro `tarea`), `BroadcastInform` con parámetro `tarea`, resets de timer para `investigarAvistamiento`. `VisionSensor` recibió dos null-checks (`eyePoint`, `cofre`) para robustez.
 
 ---
 
@@ -489,31 +489,28 @@ Modificarlo para que tolere nulls: if (propReactiva != null && propReactiva.soli
 
 ## Mejora 8 — Cámaras de vigilancia
 
-**Ficheros nuevos:** `Camera/CameraReactiveLayer.cs`, `Camera/CameraDeliberativeLayer.cs`, `Camera/CameraSocialLayer.cs`
+**Ficheros nuevos:** `Camera/CameraSensor.cs`, `Camera/CameraDeliberativeLayer.cs`, `Camera/CameraSocialLayer.cs`
 
-La cámara es un agente TM completo, equivalente en estructura a los esqueletos. Tiene capa reactiva, capa deliberativa y capa social. No tiene `ControlSubsystem` ni `AgentActuator` porque no se mueve, pero ejerce el protocolo Contract Net en el rol de **Iniciador exclusivo**: nunca es participante.
+La cámara es un agente con dos capas activas (deliberativa y social) y sin movimiento. **No tiene capa reactiva**: la cámara no ejecuta behaviours propios, así que la separación reactiva/deliberativa no aporta valor arquitectural y se elimina. El disparador del protocolo es un evento de percepción directo sensor→deliberativa, a diferencia de los esqueletos cuyo iniciador es un timer gestionado por la social.
 
-**Disparador reactivo:** cuando el `VisionSensor` detecta al ladrón, la `CameraReactiveLayer` notifica a la `CameraDeliberativeLayer`, que lanza inmediatamente el protocolo. A diferencia de los esqueletos, cuyo iniciador es el timer, el iniciador de la cámara es un evento de percepción.
+#### `CameraSensor`
 
-La separación de responsabilidades se mantiene igual que en los esqueletos: `CameraReactiveLayer` percibe y decide cuándo hay que actuar; `CameraDeliberativeLayer` gestiona el flujo del protocolo sin conocer ACL; `CameraSocialLayer` traduce cada paso al lenguaje FIPA.
+`MonoBehaviour` sensor simplificado exclusivo para cámaras. No reutiliza `VisionSensor` porque ese componente acumula lógica específica de esqueletos (cofre, rejas, NavMesh, escaneo de entorno) irrelevante para la cámara.
 
-#### `CameraReactiveLayer`
-
-`MonoBehaviour` que actúa como sensor de disparo.
-
-- Referencia a `VisionSensor` (el mismo componente reutilizado de los guardias, colocado en el GameObject de la cámara).
-- En `Awake()` suscribe a `VisionSensor.OnLadronAvistado` y `VisionSensor.OnLadronPerdido`.
-- Al dispararse `OnLadronAvistado`: llama a `deliberativa.IniciarProtocolo(sensor.PosicionLadron)`.
-- Sólo activa el protocolo **una vez por avistamiento**: el flag `protocoloActivo` lo bloquea hasta recibir `OnLadronPerdido`. El protocolo en curso no se cancela — la deliberativa lo cierra por su cuenta.
+- Campos: `ladron`, `viewDistance`, `viewAngle`, `eyePoint`, `obstacleMask`, `targetMask`, `alturaTorso`.
+- En `Update()`: llama a `PuedeVerLadron()` y dispara `OnLadronAvistado`/`OnLadronPerdido` en los flancos de activación/desactivación.
+- Expone `PosicionLadron` como propiedad pública.
+- Dibuja el cono de visión con `OnDrawGizmosSelected()`.
 
 #### `CameraDeliberativeLayer`
 
-`MonoBehaviour` independiente. **No hereda de `DeliberativeLayer`** por tres razones:
-1. `DeliberativeLayer` exige implementar `GenerarPropuesta() → ActionProposal`, un contrato para proponer movimiento que la cámara nunca necesita — devolvería `null` siempre.
-2. `ControlSubsystem` no existe en la cámara: el árbitro resuelve conflictos entre movimiento reactivo y deliberativo; la cámara no tiene movimiento, así que no hay conflicto que arbitrar.
-3. El ciclo de vida es distinto: las deliberativas de los esqueletos son *preguntadas* cada frame por `ControlSubsystem`; `CameraDeliberativeLayer` es *notificada* por la reactiva al ocurrir un evento de percepción.
+`MonoBehaviour` independiente. **No hereda de `DeliberativeLayer`** porque la cámara no propone movimiento ni usa `ControlSubsystem`. Suscribe directamente a `CameraSensor` (no hay capa reactiva intermedia) y gestiona el flag `protocoloActivo`.
 
-Gestiona la FSM del protocolo Contract Net como **Iniciador exclusivo**. Conoce la secuencia de pasos del protocolo, pero no el lenguaje ACL: llama a métodos de `CameraSocialLayer` exactamente igual que `PatrolDeliberativeLayer` llama a `SkeletonSocialLayer`.
+- En `Awake()`: suscribe a `sensor.OnLadronAvistado` y `sensor.OnLadronPerdido`, además de a los eventos de `CameraSocialLayer`.
+- `OnLadronAvistado`: si `protocoloActivo == false`, activa el flag e inicia el protocolo.
+- `OnLadronPerdido`: resetea `protocoloActivo` para permitir relanzar en el próximo avistamiento.
+
+Gestiona la FSM del protocolo Contract Net como **Iniciador exclusivo**.
 
 **Estados FSM:**
 
@@ -522,15 +519,7 @@ Gestiona la FSM del protocolo Contract Net como **Iniciador exclusivo**. Conoce 
 | `IDLE` | Esperando avistamiento. |
 | `WAIT_RESPONSES` | REQUEST enviado; esperando AGREEs y REFUSEs hasta `replyBy`. |
 | `WAIT_PROPOSALS` | CFP enviado a voluntarios; esperando PROPOSEs hasta `replyBy`. |
-| `WAIT_RESULT` | Ganador aceptado; esperando INFORM_RESULT del ejecutor (opcional; puede cerrar en WAIT_PROPOSALS). |
-
-**Lógica general:**
-
-- Al recibir `IniciarProtocolo(posicion)` desde la Reactiva: guarda la posición del avistamiento, pasa a `WAIT_RESPONSES` y llama a `social.EnviarRequest("investigarAvistamiento", todosLosEsqueletos)`.
-- En `WAIT_RESPONSES`: recoge AGREEs y REFUSEs (vía evento `OnRequestResponseReceived` de la capa social). Cierra la fase cuando ha recibido respuesta de todos los destinatarios o cuando expira `replyBy`. Si no hay voluntarios, vuelve a `IDLE`.
-- En `WAIT_PROPOSALS`: recoge PROPOSEs. Cierra al recibir todos o al expirar. Acepta el de menor coste, rechaza el resto. Pasa a `WAIT_RESULT` (o a `IDLE` si hubo 0 propuestas).
-- En `WAIT_RESULT`: espera `INFORM_RESULT` del ganador; al recibirlo (o al expirar timeout) vuelve a `IDLE`.
-- `GenerarPropuesta()` no existe: esta clase no implementa `DeliberativeLayer`. La cámara no interviene en ningún `ControlSubsystem`.
+| `WAIT_RESULT` | Ganador aceptado; esperando INFORM_RESULT del ejecutor. |
 
 **Rol Participante:** la cámara nunca responde a un REQUEST ajeno. Si `CameraSocialLayer` recibe un REQUEST, la deliberativa lo ignora (o la social responde REFUSE automáticamente).
 
@@ -578,12 +567,11 @@ Behaviour nuevo (`Agent/Behaviours/GoToPositionBehaviour.cs`) activado por `Patr
 #### Configuración en Unity
 
 La cámara es un GameObject con:
-- `VisionSensor` (ajustar `viewDistance`, `viewAngle` e `obstacleMask` según el emplazamiento)
-- `CameraReactiveLayer`
+- `CameraSensor` (ajustar `Ladron`, `viewDistance`, `viewAngle`, `eyePoint`, `obstacleMask`, `targetMask`)
 - `CameraDeliberativeLayer`
 - `CameraSocialLayer`
 
-No necesita NavMeshAgent, `NoiseEmitter`, ni `HearingSensor`.
+No necesita `CameraReactiveLayer`, NavMeshAgent, `NoiseEmitter`, ni `HearingSensor`.
 
 ---
 
@@ -598,9 +586,10 @@ No necesita NavMeshAgent, `NoiseEmitter`, ni `HearingSensor`.
 | `Deliberative/GuardianDeliberativeLayer.cs` | **Reescrito** — solo Iniciador; responde REFUSE a cualquier REQUEST recibido; `GenerarPropuesta()` siempre null |
 | `Behaviours/CheckChestBehaviour.cs` | **Nuevo** — behaviour que ejecuta el compromiso ganado: ir al cofre, comprobar `hasLoot`, notificar a Deliberativa |
 | `Behaviours/PatrolBehaviour.cs` | **Modificado** — devuelve null cuando el NavMeshAgent ya tiene destino activo; solo devuelve ActionProposal al calcular un nuevo punto de patrulla |
-| `Camera/CameraReactiveLayer.cs` | **Nuevo** — suscribe a VisionSensor; activa CameraDeliberativeLayer al avistamiento |
-| `Camera/CameraDeliberativeLayer.cs` | **Nuevo** — FSM ContractNet solo Iniciador; disparado por percepción, no por timer |
+| `Camera/CameraSensor.cs` | **Nuevo** — sensor simplificado para cámaras: solo detección del ladrón, sin lógica de cofre/rejas/NavMesh |
+| `Camera/CameraDeliberativeLayer.cs` | **Nuevo** — FSM ContractNet solo Iniciador; suscribe directamente a CameraSensor (sin capa reactiva); gestiona flag `protocoloActivo` |
 | `Camera/CameraSocialLayer.cs` | **Nuevo** — `: AgenteFIPAACL`; vocabulario Iniciador (REQUEST, CFP, ACCEPT/REJECT_PROPOSAL); usa structs de `SkeletonSocialLayer` para compatibilidad de tipos |
+| `Camera/CameraReactiveLayer.cs` | **Eliminado** — la cámara no tiene behaviours reactivos propios; la deliberativa suscribe directamente al sensor |
 | `Behaviours/GoToPositionBehaviour.cs` | **Nuevo** — behaviour que mueve a un `Vector3` arbitrario; filtra llegadas espurias por distancia; dispara `OnLlegadaCompletada` |
 | `Control/ControlSubsystem.cs` | **Sin cambios** |
 | `Reactive/PatrolReactiveLayer.cs` | **Sin cambios** — la cadena devuelve null de forma natural cuando PatrolBehaviour cede |

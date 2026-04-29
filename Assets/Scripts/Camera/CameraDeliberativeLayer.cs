@@ -1,7 +1,7 @@
 // FSM del protocolo FIPA Contract Net para la cámara de vigilancia.
 // Solo actúa como Iniciador: nunca participa como candidato.
 // No hereda de DeliberativeLayer porque la cámara no propone movimiento y no usa ControlSubsystem.
-// El disparo viene de CameraReactiveLayer (evento de percepción), no de un timer como en los esqueletos.
+// Se suscribe directamente a CameraSensor: la cámara no tiene comportamientos reactivos propios.
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -12,6 +12,8 @@ public class CameraDeliberativeLayer : MonoBehaviour
     public string tareaAvistamiento = "investigarAvistamiento";
 
     private CameraSocialLayer social;
+    private CameraSensor sensor;
+    private bool protocoloActivo;
 
     private enum Estado
     {
@@ -38,10 +40,27 @@ public class CameraDeliberativeLayer : MonoBehaviour
     void Awake()
     {
         social = GetComponent<CameraSocialLayer>();
+        sensor = GetComponent<CameraSensor>();
 
+        sensor.OnLadronAvistado += OnLadronAvistado;
+        sensor.OnLadronPerdido += OnLadronPerdido;
         social.OnRequestResponseReceived += OnRequestResponseReceived;
         social.OnProposalReceived += OnProposalReceived;
         social.OnResultReceived += OnResultReceived;
+    }
+
+    private void OnLadronAvistado()
+    {
+        if (protocoloActivo) return;
+        protocoloActivo = true;
+        Debug.Log($"[{name}] Ladrón avistado en {sensor.PosicionLadron}, iniciando ContractNet.");
+        IniciarProtocolo(sensor.PosicionLadron);
+    }
+
+    private void OnLadronPerdido()
+    {
+        Debug.Log($"[{name}] Ladrón perdido de vista.");
+        protocoloActivo = false;
     }
 
     void Update()
@@ -64,8 +83,7 @@ public class CameraDeliberativeLayer : MonoBehaviour
         }
     }
 
-    // Llamado por CameraReactiveLayer al detectar al ladrón.
-    public void IniciarProtocolo(Vector3 posicion)
+    private void IniciarProtocolo(Vector3 posicion)
     {
         if (estado != Estado.IDLE) return;
         posicionAvistamiento = posicion;
