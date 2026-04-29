@@ -132,7 +132,8 @@ public class VisionSensor : MonoBehaviour
         if (Vector3.Angle(transform.forward, haciaElCofre) > viewAngle * 0.5f) return;
 
         // Comprobación de línea de visión: no debe haber obstáculos entre el guardia y el cofre.
-        if (Physics.Raycast(eyePoint.position, haciaElCofre.normalized, haciaElCofre.magnitude, obstacleMask, QueryTriggerInteraction.Ignore)) return;
+        Vector3 origenCofre = eyePoint != null ? eyePoint.position : transform.position;
+        if (Physics.Raycast(origenCofre, haciaElCofre.normalized, haciaElCofre.magnitude, obstacleMask, QueryTriggerInteraction.Ignore)) return;
 
         cofresDesaparecidoNotificado = true;
         Debug.Log($"[VisionSensor] {name} detecta que el cofre ha desaparecido");
@@ -173,7 +174,7 @@ public class VisionSensor : MonoBehaviour
     {
         if (!ladron) return false;
 
-        Vector3 origin = eyePoint.position;
+        Vector3 origin = eyePoint != null ? eyePoint.position : transform.position;
         Vector3 targetPos = ladron.position;
         targetPos.y += alturaTorso;
 
