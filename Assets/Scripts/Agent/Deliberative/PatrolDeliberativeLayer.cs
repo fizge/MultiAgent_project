@@ -3,6 +3,7 @@
 // No conoce el lenguaje ACL: solo llama métodos de SkeletonSocialLayer y reacciona a sus eventos.
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 public class PatrolDeliberativeLayer : DeliberativeLayer
 {
@@ -16,6 +17,8 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     private const string tareaAvistamiento = "investigarAvistamiento";
     private const string tareaLadron = "ladronAvistado";
     private const string tareaBloqueo = "bloquearSalida";
+    private const string tareaBusqueda = "busquedaCoordinada";
+    public float radioBusqueda = 8f;
 
     private SkeletonSocialLayer social;
     private VisionSensor visionSensor;
@@ -69,6 +72,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         social = GetComponent<SkeletonSocialLayer>();
         visionSensor = GetComponent<VisionSensor>();
         visionSensor.OnCofresDesaparecido += OnCofresDesaparecido;
+        visionSensor.OnLadronPerdido += OnLadronPerdido;
         MovementSensor mov = GetComponent<MovementSensor>();
 
         checkChest = new CheckChestBehaviour
@@ -94,6 +98,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         social.OnCFPReceived += OnCFPReceived;
         social.OnProposalReceived += OnProposalReceived;
         social.OnProposalAccepted += OnProposalAccepted;
+        social.OnBusquedaCoordinadaReceived += OnBusquedaCoordinadaReceived;
         social.OnProposalRejected += OnProposalRejected;
         social.OnResultReceived += OnResultReceived;
         social.OnInformReceived += OnInformReceived;
@@ -132,7 +137,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     public override ActionProposal GenerarPropuesta()
     {
         if (estado != Estado.PART_EXECUTING) return null;
-        if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo) return goToPos.Evaluate();
+        if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo || tareaActual == tareaBusqueda) return goToPos.Evaluate();
         return checkChest.Evaluate();
     }
 
@@ -157,6 +162,43 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         }
         Debug.Log($"[{name}] Cofre robado — iniciando ContractNet '{tareaBloqueo}'.");
         LanzarProtocoloIniciador(tareaBloqueo);
+    }
+
+    private void OnLadronPerdido()
+    {
+        if (estado != Estado.IDLE) return;
+        Debug.Log($"[{name}] Ladrón perdido — iniciando búsqueda coordinada.");
+        social.InformarBusqueda(visionSensor.PosicionLadron);
+        IrASector(visionSensor.PosicionLadron);
+    }
+
+    private void OnBusquedaCoordinadaReceived(Vector3 ultimaPosicion)
+    {
+        if (estado != Estado.IDLE) return;
+        IrASector(ultimaPosicion);
+    }
+
+    private void IrASector(Vector3 posicionReferencia)
+    {
+        List<AgenteFIPAACL> patrulleros = new List<AgenteFIPAACL>();
+        foreach (AgenteFIPAACL a in AgenteFIPAACL.Todos)
+            if (a.GetComponent<PatrolDeliberativeLayer>() != null) patrulleros.Add(a);
+
+        int miIndice = patrulleros.IndexOf(social);
+        if (miIndice < 0) miIndice = 0;
+        float angulo = miIndice * (360f / Mathf.Max(patrulleros.Count, 1));
+        Vector3 direccion = Quaternion.Euler(0, angulo, 0) * Vector3.forward;
+        Vector3 candidato = posicionReferencia + direccion * radioBusqueda;
+
+        NavMeshHit hit;
+        Vector3 destino = NavMesh.SamplePosition(candidato, out hit, radioBusqueda, NavMesh.AllAreas)
+            ? hit.position
+            : transform.position; // si no hay punto válido, el agente se queda donde está
+
+        tareaActual = tareaBusqueda;
+        estado = Estado.PART_EXECUTING;
+        goToPos.Activar(destino);
+        Debug.Log($"[{name}] Sector {angulo:F0}° → {destino}");
     }
 
     private void LanzarProtocoloIniciador(string tarea)
@@ -236,13 +278,12 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     {
         if (proposalCostes.Count == 0)
         {
-            // Ningún PROPOSE: abortamos y reiniciamos timer.
             FinalizarConversacionIniciador();
             social.ReiniciarTimer();
             return;
         }
 
-        // Selecciona la propuesta de menor coste (distancia al cofre).
+        // Selecciona la propuesta de menor coste.
         string ganadorId = null;
         float mejorCoste = float.MaxValue;
         foreach (KeyValuePair<string, float> kv in proposalCostes)
@@ -259,7 +300,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         foreach (KeyValuePair<string, AgenteFIPAACL> kv in proposalAgents)
             if (kv.Key != ganadorId) social.RechazarPropuesta(convIdActual, kv.Value);
 
-        deadlineFase = Time.time + timeoutFase * 4f; // la ejecución del cofre puede ser larga
+        deadlineFase = Time.time + timeoutFase * 4f;
         estado = Estado.INIT_WAIT_RESULT;
     }
 
@@ -331,7 +372,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         if (convId != convIdActual) return;
         if (estado == Estado.PART_EXECUTING)
         {
-            if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo)
+            if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo || tareaActual == tareaBusqueda)
                 goToPos.Desactivar();
             else
                 checkChest.Desactivar();
@@ -356,10 +397,18 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         social.ReiniciarTimer(); // el ganador reinicia su timer al terminar la tarea
     }
 
-    // Llamado por GoToPositionBehaviour cuando el patrullero llega a la posición del avistamiento.
+    // Llamado por GoToPositionBehaviour cuando el patrullero llega a su destino.
     private void OnInvestigacionCompletada()
     {
         if (estado != Estado.PART_EXECUTING) return;
+
+        if (tareaActual == tareaBusqueda)
+        {
+            // Búsqueda coordinada: no hay iniciador ni broadcast, simplemente volvemos a patrullar.
+            ResetParticipante();
+            social.ReiniciarTimer();
+            return;
+        }
 
         string resultado = tareaActual == tareaBloqueo ? "salida bloqueada" : "avistamiento investigado";
 

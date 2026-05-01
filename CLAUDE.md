@@ -87,8 +87,8 @@ Assets/Scripts/
 | `Reactive/PatrolReactiveLayer.cs` | Patrol guard: Attack > Chase > Investigate > FollowGuard > Patrol priority chain; expone propiedad `Patrol` para que la deliberativa acceda al behaviour |
 | `Reactive/GuardianReactiveLayer.cs` | Static guard: Attack > Chase > Investigate > FollowGuard > Watch priority chain |
 | `Deliberative/DeliberativeLayer.cs` | Abstract base — subclass to add deliberative planning |
-| `Deliberative/PatrolDeliberativeLayer.cs` | [Mejora 7c] FSM ContractNet completa (iniciador y participante); sin lenguaje ACL; obtiene `patrolBehaviour` en `Start()` para evitar problemas de orden de inicialización; activa modo alerta al recibir INFORM de cofre robado |
-| `Deliberative/GuardianDeliberativeLayer.cs` | [Mejora 7c] FSM solo Iniciador; siempre rechaza REQUEST como participante; `GenerarPropuesta()` siempre null |
+| `Deliberative/PatrolDeliberativeLayer.cs` | FSM ContractNet completa (iniciador y participante); tareas: `comprobarCofre`, `investigarAvistamiento`, `ladronAvistado`, `bloquearSalida`; `LanzarProtocoloIniciador(tarea)` centraliza el lanzamiento; obtiene `patrolBehaviour` en `Start()`; activa modo alerta al recibir INFORM de cofre robado; campos serializados: `cofre`, `zonaSalida` |
+| `Deliberative/GuardianDeliberativeLayer.cs` | FSM solo Iniciador; tareas: `comprobarCofre`, `ladronAvistado`; `LanzarProtocolo(tarea)` centraliza el lanzamiento; suscribe a `OnLadronAvistado`; siempre rechaza REQUEST como participante; campos serializados: `cofre`, `puntoEntrada` |
 | `Communication/AgenteFIPAACL.cs` | [Mejora 7a] Clase padre abstracta: inbox, envío unicast, registro estático, límite msgs/frame, historial de conversaciones por `conversationId` |
 | `Communication/ACLMessage.cs` | [Mejora 7a] Contenedor de mensaje FIPA con todos sus campos |
 | `Social/SkeletonSocialLayer.cs` | [Mejora 7b] Hereda AgenteFIPAACL; define todo el lenguaje ACL (performatives, payloads, API traducción), timer aleatorio coordinado; `BroadcastInform` solo envía a patrulleros (filtra guardianes y cámaras comprobando `PatrolDeliberativeLayer`) |
@@ -103,7 +103,7 @@ Assets/Scripts/
 | `Behaviours/FollowGuardBehaviour.cs` | Active when another guard is heard running (and no direct thief info) — move to guard position |
 | `Behaviours/PatrolBehaviour.cs` | Fallback for patrol guard — move between two scanned points; `velocidadAlerta` (default 3 m/s) activada por `ActivarModoAlerta()` cuando se confirma el robo del cofre |
 | `Behaviours/WatchBehaviour.cs` | Fallback for static guard — oscillate vision ±watchAngle° |
-| `Behaviours/WatchExitBehaviour.cs` | Active when chest is detected stolen — run to exit zone |
+| `Behaviours/GoToPositionBehaviour.cs` | Behaviour activado por la deliberativa al ganar contratos de investigación o bloqueo; mueve a un `Vector3` arbitrario; filtra llegadas espurias por distancia; dispara `OnLlegadaCompletada` |
 | `Sensors/VisionSensor.cs` | Distance + FoV (180°) + raycast LOS; publishes events on state change; scans environment in 16 directions for patrol planning; polls `DynamicBars.todas` each frame and re-triggers `EscanearEntorno()` when a visible bar changes state |
 | `World/DynamicBars.cs` | Cyclic obstacle: rises from floor on a timer, stays up briefly, then retracts. Exposes `EstaArriba` property and registers in static `DynamicBars.todas` list so `VisionSensor` can poll it without direct references. Carries a `NavMeshObstacle` to carve the NavMesh while raised |
 | `Sensors/HearingSensor.cs` | Overlap-radius detection via `NoiseEmitter`; distinguishes thief from guard noise; applies positional imprecision |
@@ -652,25 +652,14 @@ Cuando un patrullero detecta que el cofre fue robado (`VisionSensor.OnCofresDesa
 
 ---
 
-## Mejora 11 — Flanqueo durante persecución
+## Mejora 11 — Búsqueda coordinada tras perder al ladrón ✓
 
-Cuando un patrullero entra en estado `Chase` (ladrón visible y fuera de rango de ataque), lanza un Contract Net con tarea `"flaquear"`. El ganador se mueve a una posición de intercepción calculada entre el ladrón y la salida, intentando cortarle el paso mientras el perseguidor lo presiona por detrás.
+Cuando un patrullero pierde al ladrón (`VisionSensor.OnLadronPerdido`), emite un `INFORM` con `ContentBusqueda` a todos los patrulleros con la última posición conocida. Cada patrullero — incluido el emisor — calcula su propio sector de forma autónoma consultando `AgenteFIPAACL.Todos`: obtiene su índice entre los patrulleros y le asigna el ángulo `índice * (360 / total)`. El destino se corrige con `NavMesh.SamplePosition` para garantizar que cae dentro del NavMesh.
 
-**Importante:** misma regla que el resto — Contract Net completo, sin broadcasts aislados.
+**Motivación:** sin esta mejora todos los patrulleros convergen al mismo último punto conocido. Con ella se dispersan cubriendo distintas zonas del castillo de forma emergente, sin negociación central.
 
-**Trigger:** `PatrolDeliberativeLayer` detecta que `ChaseBehaviour` está activo en la reactiva. Para no relanzar el protocolo cada frame, se usa un flag `flanqueoActivo` que se activa al lanzar el REQUEST y se desactiva cuando el ladrón se pierde de vista (`VisionSensor.OnLadronPerdido`).
+**Decisión de diseño — INFORM en vez de Contract Net:** no hay un ganador único — todos participan con un sector distinto. Forzar Contract Net sería incorrecto arquitecturalmente. La coordinación emerge de las posiciones relativas sin ningún intercambio de propuestas.
 
-**Payload del CFP:** posición de intercepción calculada como punto en la línea `[posicionLadron → posicionSalida]` a una fracción del camino (p.ej. 40% desde el ladrón). Se pasa como `posicionReferencia` en `ContentCFP`. Cada participante propone `coste = distancia(self, posicionIntercepcion)`.
-
-**Dificultad principal:** la posición de intercepción es dinámica (el ladrón se mueve), pero el CFP solo se envía una vez. El ganador va a la posición del momento del avistamiento — si el ladrón cambia de dirección, el flanqueo puede quedar descolocado. Es un comportamiento aproximado, no perfecto.
-
-**Puntos de implementación:**
-- `PatrolDeliberativeLayer`: detectar onset de Chase (suscribir a `VisionSensor.OnLadronAvistado` combinado con que `ChaseBehaviour.EstaActivo`); lanzar REQUEST con tarea `"flaquear"` si `flanqueoActivo == false`.
-- `PatrolDeliberativeLayer` como Participante: aceptar `"flaquear"` solo si el agente **no** está en Chase activo (no puede flanquear si él mismo está persiguiendo); al ganar, activar `GoToPositionBehaviour` con la posición de intercepción.
-- El perseguidor (Iniciador) no participa como candidato — añadir exclusión en `OnRequestReceived` si `tareaActual == "flaquear"` y el propio agente está en Chase.
-- `ContentCFP` ya soporta `posicionReferencia` — no se necesitan cambios en la capa social.
-
-**Posibles consecuencias:**
-- **Opción A — Intercepción pura:** el flanqueador llega a la posición y espera al ladrón con `WatchBehaviour` temporal.
-- **Opción B — Pinza coordinada:** si el flanqueador avista al ladrón al llegar, entra en Chase también, creando una persecución desde dos frentes.
-- **Opción C — Reposicionamiento adaptativo:** si el ladrón cambia de dirección y se pierde (`OnLadronPerdido` en el perseguidor), el perseguidor cancela el contrato (`social.Cancelar`) y el flanqueador aborta, evitando que vaya a una posición ya inútil.
+**Implementación:**
+- `SkeletonSocialLayer`: struct `ContentBusqueda { Vector3 ultimaPosicion }`; método `InformarBusqueda(Vector3 posicion)` que manda `INFORM` con `ContentBusqueda` a todos los patrulleros; evento `OnBusquedaCoordinadaReceived(Vector3)` disparado al recibir ese INFORM.
+- `PatrolDeliberativeLayer`: suscribe a `OnLadronPerdido` y `OnBusquedaCoordinadaReceived`; campo `radioBusqueda` (default 8 m); método `IrASector(Vector3 posicionReferencia)` calcula ángulo por índice, corrige destino con `NavMesh.SamplePosition` y activa `GoToPositionBehaviour` con `estado = PART_EXECUTING`; al llegar, vuelve a IDLE sin INFORM_RESULT (no hay iniciador).

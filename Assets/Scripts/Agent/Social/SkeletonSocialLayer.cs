@@ -58,12 +58,18 @@ public class SkeletonSocialLayer : AgenteFIPAACL
         public override string ToString() => $"tarea={tarea}, exito={exito}, datos={datos}";
     }
 
+    public struct ContentBusqueda
+    {
+        public Vector3 ultimaPosicion;
+    }
+
     // Eventos hacia la Deliberativa: traducen los ACLMessage entrantes a datos sin lenguaje FIPA
     public event Action<string, string, string> OnRequestReceived;          // from, tarea, convId
     public event Action<string, bool, string> OnRequestResponseReceived;   // from, acepto, convId
     public event Action<string, string, Vector3, string> OnCFPReceived;     // from, tarea, refPos, convId
     public event Action<string, float, string> OnProposalReceived;         // from, coste, convId
     public event Action<string> OnProposalAccepted;                       // convId
+    public event Action<Vector3> OnBusquedaCoordinadaReceived;           // ultimaPosicion
     public event Action<string> OnProposalRejected;                          // convId
     public event Action<string, bool, object, string> OnResultReceived;  // from, exito, datos, convId
     public event Action<string, bool, object, string> OnInformReceived; // from, exito, datos, convId — externo al Contract Net
@@ -160,6 +166,23 @@ public class SkeletonSocialLayer : AgenteFIPAACL
         msg.inReplyTo = convId;
         msg.receivers.Add(ganador.IdAgente);
         EnviarMensaje(msg, ganador);
+    }
+
+    // Emite un INFORM de búsqueda coordinada a todos los patrulleros con la última posición del ladrón
+    public void InformarBusqueda(Vector3 ultimaPosicion)
+    {
+        foreach (AgenteFIPAACL dest in Todos)
+        {
+            if (dest == this) continue;
+            SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer;
+            if (skelDest == null) continue;
+            if (skelDest.GetComponent<PatrolDeliberativeLayer>() == null) continue;
+
+            ACLMessage msg = CrearMensaje(INFORM, null);
+            msg.content = new ContentBusqueda { ultimaPosicion = ultimaPosicion };
+            msg.receivers.Add(skelDest.IdAgente);
+            EnviarMensaje(msg, skelDest);
+        }
     }
 
     // Notifica a un candidato que no fue seleccionado
@@ -275,7 +298,7 @@ public class SkeletonSocialLayer : AgenteFIPAACL
                 break;
 
             case ACCEPT_PROPOSAL:
-                OnProposalAccepted?.Invoke(msg.conversationId); // este agente ganó: debe ejecutar CheckChestBehaviour
+                OnProposalAccepted?.Invoke(msg.conversationId);
                 break;
 
             case REJECT_PROPOSAL:
@@ -294,10 +317,14 @@ public class SkeletonSocialLayer : AgenteFIPAACL
                 break;
 
             case INFORM:
-                if (msg.content is ContentInform informMsg)
+                if (msg.content is ContentBusqueda busqueda)
+                {
+                    OnBusquedaCoordinadaReceived?.Invoke(busqueda.ultimaPosicion);
+                }
+                else if (msg.content is ContentInform informMsg)
                 {
                     if (informMsg.tarea == "comprobarCofre" || informMsg.tarea == "investigarAvistamiento")
-                        SortearTimer(); // notificación externa: la conversación terminó, reiniciar timer
+                        SortearTimer();
                     OnInformReceived?.Invoke(msg.sender, informMsg.exito, informMsg.datos, msg.conversationId);
                 }
                 else
