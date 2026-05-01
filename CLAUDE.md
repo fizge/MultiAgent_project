@@ -84,16 +84,16 @@ Assets/Scripts/
 | `Control/ControlSubsystem.cs` | Arbiter — calls both layers, picks winner via inhibition rule |
 | `Control/ActionProposal.cs` | Plain C# data object passed between layers and actuator |
 | `Reactive/ReactiveLayer.cs` | Abstract base — subclass per guard type |
-| `Reactive/PatrolReactiveLayer.cs` | Patrol guard: Attack > Chase > WatchExit > Investigate > FollowGuard > Patrol priority chain |
+| `Reactive/PatrolReactiveLayer.cs` | Patrol guard: Attack > Chase > WatchExit > Investigate > FollowGuard > Patrol priority chain; expone propiedad `Patrol` para que la deliberativa acceda al behaviour |
 | `Reactive/GuardianReactiveLayer.cs` | Static guard: Attack > Chase > Investigate > FollowGuard > Watch priority chain |
 | `Deliberative/DeliberativeLayer.cs` | Abstract base — subclass to add deliberative planning |
-| `Deliberative/PatrolDeliberativeLayer.cs` | [Mejora 7c] FSM ContractNet completa (iniciador y participante); sin lenguaje ACL |
-| `Deliberative/GuardianDeliberativeLayer.cs` | [Mejora 7c] ídem para guardia estático |
-| `Communication/AgenteFIPAACL.cs` | [Mejora 7a] Clase padre abstracta: inbox, envío unicast, registro estático, límite msgs/frame |
+| `Deliberative/PatrolDeliberativeLayer.cs` | [Mejora 7c] FSM ContractNet completa (iniciador y participante); sin lenguaje ACL; obtiene `patrolBehaviour` en `Start()` para evitar problemas de orden de inicialización; activa modo alerta al recibir INFORM de cofre robado |
+| `Deliberative/GuardianDeliberativeLayer.cs` | [Mejora 7c] FSM solo Iniciador; siempre rechaza REQUEST como participante; `GenerarPropuesta()` siempre null |
+| `Communication/AgenteFIPAACL.cs` | [Mejora 7a] Clase padre abstracta: inbox, envío unicast, registro estático, límite msgs/frame, historial de conversaciones por `conversationId` |
 | `Communication/ACLMessage.cs` | [Mejora 7a] Contenedor de mensaje FIPA con todos sus campos |
-| `Social/SkeletonSocialLayer.cs` | [Mejora 7b] Hereda AgenteFIPAACL; define todo el lenguaje ACL (performatives, payloads, API traducción), timer aleatorio coordinado |
+| `Social/SkeletonSocialLayer.cs` | [Mejora 7b] Hereda AgenteFIPAACL; define todo el lenguaje ACL (performatives, payloads, API traducción), timer aleatorio coordinado; `BroadcastInform` solo envía a patrulleros (filtra guardianes y cámaras comprobando `PatrolDeliberativeLayer`) |
 | `Behaviours/CheckChestBehaviour.cs` | [Mejora 7c] Behaviour que ejecuta el compromiso ContractNet: ir al cofre y comprobar estado |
-| `Camera/CameraSensor.cs` | [Mejora 8] Sensor simplificado exclusivo para cámaras: detecta al ladrón, dispara OnLadronAvistado/OnLadronPerdido; sin lógica de cofre, rejas ni NavMesh |
+| `Camera/CameraSensor.cs` | [Mejora 8] Sensor simplificado exclusivo para cámaras: detecta al ladrón, dispara OnLadronAvistado/OnLadronPerdido; sin lógica de cofre, rejas ni NavMesh; Gizmo dibuja cono 3D real usando `transform.right` y `transform.up` |
 | `Camera/CameraDeliberativeLayer.cs` | [Mejora 8] FSM solo Iniciador; suscribe directamente a CameraSensor; gestiona el protocolo ContractNet sin capa reactiva; nunca propone movimiento |
 | `Camera/CameraSocialLayer.cs` | [Mejora 8] Hereda AgenteFIPAACL; vocabulario ContractNet del lado Iniciador (REQUEST, CFP, ACCEPT/REJECT_PROPOSAL) |
 | `Behaviours/IBehaviour.cs` | Interface common to all behaviours: `Evaluate() → ActionProposal?` |
@@ -101,7 +101,7 @@ Assets/Scripts/
 | `Behaviours/ChaseBehaviour.cs` | Active when thief visible but NOT in range — pursue |
 | `Behaviours/InvestigateBehaviour.cs` | Active when thief heard but NOT visible — move to noise position at walk speed |
 | `Behaviours/FollowGuardBehaviour.cs` | Active when another guard is heard running (and no direct thief info) — move to guard position |
-| `Behaviours/PatrolBehaviour.cs` | Fallback for patrol guard — move between two scanned points |
+| `Behaviours/PatrolBehaviour.cs` | Fallback for patrol guard — move between two scanned points; `velocidadAlerta` (default 3 m/s) activada por `ActivarModoAlerta()` cuando se confirma el robo del cofre |
 | `Behaviours/WatchBehaviour.cs` | Fallback for static guard — oscillate vision ±watchAngle° |
 | `Behaviours/WatchExitBehaviour.cs` | Active when chest is detected stolen — run to exit zone |
 | `Sensors/VisionSensor.cs` | Distance + FoV (180°) + raycast LOS; publishes events on state change; scans environment in 16 directions for patrol planning; polls `DynamicBars.todas` each frame and re-triggers `EscanearEntorno()` when a visible bar changes state |
@@ -598,25 +598,19 @@ No necesita `CameraReactiveLayer`, NavMeshAgent, `NoiseEmitter`, ni `HearingSens
 | `Sensors/HearingSensor.cs` | **Sin cambios** |
 | `Deliberative/DeliberativeLayer.cs` | **Sin cambios** (la firma abstracta sigue siendo válida) |
 
-## Posibles consecuencias de los comportamientos que involucran la comunicación
+## Consecuencias de los comportamientos que involucran la comunicación
 
-Actualmente `CheckChestBehaviour` y `GoToPositionBehaviour` completan el protocolo Contract Net correctamente pero **no tienen ningún efecto observable en el gameplay** al recibir el resultado. A continuación se recogen las opciones barajadas para añadir consecuencias reales.
+### `CheckChestBehaviour` — cofre vacío ✓
 
-### `CheckChestBehaviour` — cofre vacío
+**Modo alerta: subir velocidad de patrulla (implementado)**
 
-**Opción A — Modo alerta: subir velocidad de patrulla**
+Cuando el ganador confirma que el cofre fue robado, el broadcast `INFORM` llega a todos los patrulleros. En `OnInformReceived` de `PatrolDeliberativeLayer`, si `!exito`: se activa `cofreRobadoConfirmado` (evita relanzar el Contract Net) y se llama a `patrolBehaviour.ActivarModoAlerta()`, que sube la `speed` de `PatrolBehaviour` a `velocidadAlerta` (3 m/s por defecto en Inspector). El estado de alerta es permanente para esa partida. `PatrolBehaviour` expone `velocidadAlerta` como campo público configurable en el Inspector. `PatrolReactiveLayer` expone la propiedad `Patrol` para que la deliberativa pueda acceder al behaviour.
 
-Cuando el ganador confirma que el cofre fue robado, todos los patrulleros que reciben el `INFORM` de alerta aumentan su velocidad de patrulla. Para que el contraste sea visible, habría que bajar primero la velocidad normal de patrulla respecto a los valores actuales. El enganche es `OnInformReceived` en `PatrolDeliberativeLayer` cuando `!exito`: ahí se activa el flag `cofreRobadoConfirmado` (ya existe) y además se sube la velocidad que `PatrolBehaviour` usa al calcular su `ActionProposal`.
+### `GoToPositionBehaviour` — avistamiento de cámara ✓
 
-### `GoToPositionBehaviour` — avistamiento de cámara
+**Redirigir patrulla a la zona investigada (implementado por diseño)**
 
-**Opción A — Vigilancia estática temporal**
-
-El guardia que llega a la posición se queda quieto vigilando esa zona unos segundos (un mini-`WatchBehaviour` temporal) antes de volver a patrullar. Sin comunicación extra; solo efecto visual que refuerza que la investigación fue real.
-
-**Opción B — Alerta coordinada si se confirma avistamiento**
-
-Si al llegar el guardia ganador detecta al ladrón con su `VisionSensor` (la capa reactiva ya lo haría perseguirlo), podría emitir un `INFORM` de alerta a todos los demás patrulleros para que redirijan su patrulla hacia esa zona. Reutiliza la infraestructura de comunicación ya construida y añade coordinación real entre agentes como consecuencia del resultado del protocolo.
+Al llegar a la posición del avistamiento, `MovementSensor.OnDestinoAlcanzado` dispara automáticamente `EscanearEntorno()` en `VisionSensor`, que emite `OnEscaneoCompletado`. `PatrolBehaviour` recibe ese evento y recalcula sus waypoints A/B desde la nueva posición. El guardia queda patrullando en la zona investigada indefinidamente sin ningún código adicional.
 
 ---
 

@@ -59,23 +59,32 @@ public class CameraSensor : MonoBehaviour
     {
         Vector3 origen = eyePoint != null ? eyePoint.position : transform.position;
         float semiAngulo = viewAngle * 0.5f;
+        int segmentos = 24;
 
         Gizmos.color = Color.yellow;
-        Vector3 izquierda = Quaternion.Euler(0, -semiAngulo, 0) * transform.forward;
-        Vector3 derecha   = Quaternion.Euler(0,  semiAngulo, 0) * transform.forward;
-        Gizmos.DrawRay(origen, transform.forward * viewDistance);
-        Gizmos.DrawRay(origen, izquierda * viewDistance);
-        Gizmos.DrawRay(origen, derecha * viewDistance);
 
-        int segmentos = 24;
-        Vector3 puntoAnterior = origen + izquierda * viewDistance;
+        // Rayo central
+        Gizmos.DrawRay(origen, transform.forward * viewDistance);
+
+        // Círculo en el extremo del cono (plano perpendicular a forward)
+        float radioCirculo = Mathf.Tan(semiAngulo * Mathf.Deg2Rad) * viewDistance;
+        Vector3 centroCirculo = origen + transform.forward * viewDistance;
+        Vector3 right = transform.right;
+        Vector3 up = transform.up;
+
+        Vector3 puntoAnterior = centroCirculo + right * radioCirculo;
         for (int i = 1; i <= segmentos; i++)
         {
-            float angulo = -semiAngulo + viewAngle * (i / (float)segmentos);
-            Vector3 dir = Quaternion.Euler(0, angulo, 0) * transform.forward;
-            Vector3 puntoActual = origen + dir * viewDistance;
+            float angulo = i * (360f / segmentos);
+            Vector3 puntoActual = centroCirculo + (right * Mathf.Cos(angulo * Mathf.Deg2Rad) + up * Mathf.Sin(angulo * Mathf.Deg2Rad)) * radioCirculo;
             Gizmos.DrawLine(puntoAnterior, puntoActual);
             puntoAnterior = puntoActual;
         }
+
+        // Líneas desde el origen hasta el borde del círculo (arriba, abajo, izquierda, derecha)
+        Gizmos.DrawLine(origen, centroCirculo + right * radioCirculo);
+        Gizmos.DrawLine(origen, centroCirculo - right * radioCirculo);
+        Gizmos.DrawLine(origen, centroCirculo + up * radioCirculo);
+        Gizmos.DrawLine(origen, centroCirculo - up * radioCirculo);
     }
 }

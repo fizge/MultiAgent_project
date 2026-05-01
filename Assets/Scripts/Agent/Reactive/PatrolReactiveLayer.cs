@@ -20,6 +20,7 @@ public class PatrolReactiveLayer : ReactiveLayer
     private InvestigateBehaviour investigate;
     private FollowGuardBehaviour followGuard;
     private PatrolBehaviour      patrol;
+    public PatrolBehaviour Patrol => patrol;
 
     // Para cada comportamiento, se crean y se inicializan suscribiendo los eventos del sensor
     void Awake()

@@ -8,6 +8,12 @@ public class PatrolBehaviour : IBehaviour
     public float speed = 2f;
     public float acceleration = 2f;
     public float wallMargin = 1.5f;
+    public float velocidadAlerta = 3f;
+
+    public void ActivarModoAlerta()
+    {
+        speed = velocidadAlerta;
+    }
 
     private Transform agentTransform;
     private Vector3 puntoA, puntoB, destinoActual;

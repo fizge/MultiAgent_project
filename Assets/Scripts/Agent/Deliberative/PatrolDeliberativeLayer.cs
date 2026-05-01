@@ -17,6 +17,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     private SkeletonSocialLayer social;
     private CheckChestBehaviour checkChest;
     private GoToPositionBehaviour goToPos;
+    private PatrolBehaviour patrolBehaviour;
 
     // La capa deliberativa no sabe quá tarea está ejecutando hasta que recibe el request,
     // pero lo guarda para decidir qué comportamiento activar al aceptar la propuesta
@@ -53,6 +54,11 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
 
     // Flag que evita relanzar el Contract Net una vez confirmado que el cofre fue robado.
     private bool cofreRobadoConfirmado;
+
+    void Start()
+    {
+        patrolBehaviour = GetComponent<PatrolReactiveLayer>().Patrol;
+    }
 
     void Awake()
     {
@@ -357,8 +363,9 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     {
         if (!exito)
         {
-            cofreRobadoConfirmado = true; // evita relanzar el Contract Net en el futuro
-            Debug.Log($"[{name}] ALERTA: cofre robado (informado por {from}, conv={convId}).");
+            cofreRobadoConfirmado = true;
+            patrolBehaviour.ActivarModoAlerta();
+            Debug.Log($"[{name}] ALERTA: cofre robado — modo alerta activado (informado por {from}, conv={convId}).");
         }
     }
 

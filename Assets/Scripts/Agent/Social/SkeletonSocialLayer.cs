@@ -204,7 +204,8 @@ public class SkeletonSocialLayer : AgenteFIPAACL
         {
             if (dest == this) continue;
             SkeletonSocialLayer skelDest = dest as SkeletonSocialLayer;
-            if (skelDest == null) continue; // solo patrulleros (filtra cámaras y otros)
+            if (skelDest == null) continue;
+            if (skelDest.GetComponent<PatrolDeliberativeLayer>() == null) continue; // solo patrulleros
 
             ACLMessage msg = CrearMensaje(INFORM, convId);
             msg.content = new ContentInform { tarea = tarea, exito = exito, datos = datos };
