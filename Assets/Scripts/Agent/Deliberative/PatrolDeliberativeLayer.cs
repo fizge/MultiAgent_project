@@ -7,14 +7,18 @@ using UnityEngine;
 public class PatrolDeliberativeLayer : DeliberativeLayer
 {
     [SerializeField] private Transform cofre;
-    public float velocidadComprobacion = 2f;
+    [SerializeField] private Transform zonaSalida;
+    public float velocidadComprobacion = 4f;
     public float aceleracionComprobacion = 2f;
     public float toleranciaCofre = 2f;
     public float timeoutFase = 3f; // segundos máximos de espera por fase del protocolo
     public string tareaCofre = "comprobarCofre";
     private const string tareaAvistamiento = "investigarAvistamiento";
+    private const string tareaLadron = "ladronAvistado";
+    private const string tareaBloqueo = "bloquearSalida";
 
     private SkeletonSocialLayer social;
+    private VisionSensor visionSensor;
     private CheckChestBehaviour checkChest;
     private GoToPositionBehaviour goToPos;
     private PatrolBehaviour patrolBehaviour;
@@ -63,8 +67,9 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     void Awake()
     {
         social = GetComponent<SkeletonSocialLayer>();
+        visionSensor = GetComponent<VisionSensor>();
+        visionSensor.OnCofresDesaparecido += OnCofresDesaparecido;
         MovementSensor mov = GetComponent<MovementSensor>();
-        VisionSensor vision = GetComponent<VisionSensor>();
 
         checkChest = new CheckChestBehaviour
         {
@@ -72,7 +77,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
             acceleration = aceleracionComprobacion,
             toleranciaCofre = toleranciaCofre
         };
-        checkChest.Initialize(transform, cofre, mov, vision);
+        checkChest.Initialize(transform, cofre, mov, visionSensor);
         checkChest.OnComprobacionCompletada += OnCheckChestCompletado;
 
         goToPos = new GoToPositionBehaviour
@@ -127,7 +132,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     public override ActionProposal GenerarPropuesta()
     {
         if (estado != Estado.PART_EXECUTING) return null;
-        if (tareaActual == tareaAvistamiento) return goToPos.Evaluate();
+        if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo) return goToPos.Evaluate();
         return checkChest.Evaluate();
     }
 
@@ -137,8 +142,25 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     {
         if (estado != Estado.IDLE) return;
         if (cofre == null) return;
-        if (cofreRobadoConfirmado) return; // ya se sabe que el cofre fue robado, no tiene sentido comprobarlo de nuevo
+        if (cofreRobadoConfirmado) return;
+        LanzarProtocoloIniciador(tareaCofre);
+    }
 
+    private void OnCofresDesaparecido()
+    {
+        if (estado != Estado.IDLE) return;
+        if (cofreRobadoConfirmado) return;
+        if (zonaSalida == null)
+        {
+            Debug.LogWarning($"[{name}] Cofre robado pero zonaSalida no asignada — protocolo cancelado.");
+            return;
+        }
+        Debug.Log($"[{name}] Cofre robado — iniciando ContractNet '{tareaBloqueo}'.");
+        LanzarProtocoloIniciador(tareaBloqueo);
+    }
+
+    private void LanzarProtocoloIniciador(string tarea)
+    {
         destinatariosRequest.Clear();
         foreach (AgenteFIPAACL a in AgenteFIPAACL.Todos)
         {
@@ -152,12 +174,13 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
             return;
         }
 
-        convIdActual = social.EnviarRequest(tareaCofre, destinatariosRequest);
+        convIdActual = social.EnviarRequest(tarea, destinatariosRequest);
         voluntarios.Clear();
         respuestasEsperadas = destinatariosRequest.Count;
         respuestasRecibidas = 0;
         deadlineFase = Time.time + timeoutFase;
         estado = Estado.INIT_WAIT_RESPONSES;
+        tareaActual = tarea;
     }
 
     private void OnRequestResponseReceived(string from, bool acepto, string convId)
@@ -184,7 +207,8 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
             return;
         }
 
-        social.EnviarCFP(convIdActual, voluntarios, cofre.position, tareaCofre);
+        Vector3 posicionCFP = tareaActual == tareaBloqueo ? zonaSalida.position : cofre.position;
+        social.EnviarCFP(convIdActual, voluntarios, posicionCFP, tareaActual);
         proposalAgents.Clear();
         proposalCostes.Clear();
         propuestasEsperadas = voluntarios.Count;
@@ -253,7 +277,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         AgenteFIPAACL iniciador = BuscarAgentePorId(from);
         if (iniciador == null) return;
 
-        bool puedoAceptar = (estado == Estado.IDLE) && (tarea == tareaCofre || tarea == tareaAvistamiento);
+        bool puedoAceptar = (estado == Estado.IDLE) && (tarea == tareaCofre || tarea == tareaAvistamiento || tarea == tareaLadron || tarea == tareaBloqueo);
         social.ResponderRequest(convId, puedoAceptar, iniciador);
 
         if (puedoAceptar)
@@ -277,7 +301,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         }
 
         // Guarda la posición de investigación
-        if (tareaActual == tareaAvistamiento) posicionInvestigacion = refPos;
+        if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo) posicionInvestigacion = refPos;
 
         float coste = Vector3.Distance(transform.position, refPos);
         social.EnviarPropuesta(convId, coste, iniciadorActual);
@@ -289,7 +313,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     {
         if (estado != Estado.PART_PROPOSED || convId != convIdActual) return;
         estado = Estado.PART_EXECUTING;
-        if (tareaActual == tareaAvistamiento)
+        if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo)
             goToPos.Activar(posicionInvestigacion);
         else
             checkChest.Activar();
@@ -307,7 +331,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         if (convId != convIdActual) return;
         if (estado == Estado.PART_EXECUTING)
         {
-            if (tareaActual == tareaAvistamiento)
+            if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo)
                 goToPos.Desactivar();
             else
                 checkChest.Desactivar();
@@ -337,12 +361,12 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     {
         if (estado != Estado.PART_EXECUTING) return;
 
-        if (iniciadorActual != null)
-            social.InformarResultado(convIdActual, true, "avistamiento investigado",
-                                     tareaAvistamiento, new List<AgenteFIPAACL> { iniciadorActual });
+        string resultado = tareaActual == tareaBloqueo ? "salida bloqueada" : "avistamiento investigado";
 
-        // INFORM a todos los patrulleros para que reinicien sus timers.
-        social.BroadcastInform(convIdActual, true, "avistamiento investigado", tareaAvistamiento);
+        if (iniciadorActual != null)
+            social.InformarResultado(convIdActual, true, resultado, tareaActual, new List<AgenteFIPAACL> { iniciadorActual });
+
+        social.BroadcastInform(convIdActual, true, resultado, tareaActual);
 
         ResetParticipante();
         social.ReiniciarTimer();

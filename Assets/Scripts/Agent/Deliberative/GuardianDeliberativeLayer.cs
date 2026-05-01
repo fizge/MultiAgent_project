@@ -8,10 +8,14 @@ using UnityEngine;
 public class GuardianDeliberativeLayer : DeliberativeLayer
 {
     [SerializeField] private Transform cofre;
+    [SerializeField] private Transform puntoEntrada;
     public float timeoutFase = 3f;
     public string tareaCofre = "comprobarCofre";
+    private const string tareaLadron = "ladronAvistado";
 
     private SkeletonSocialLayer social;
+    private VisionSensor visionSensor;
+    private string tareaActual;
 
     private enum Estado
     {
@@ -40,6 +44,8 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
     void Awake()
     {
         social = GetComponent<SkeletonSocialLayer>();
+        visionSensor = GetComponent<VisionSensor>();
+        if (visionSensor != null) visionSensor.OnLadronAvistado += OnLadronAvistado;
 
         social.OnTimerExpired += OnTimerExpired;
         social.OnRequestReceived += OnRequestReceived;
@@ -77,12 +83,20 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
 
     // -------------------- Iniciador --------------------
 
-    private void OnTimerExpired()
+    private void OnLadronAvistado()
     {
         if (estado != Estado.IDLE) return;
-        if (cofre == null) return;
-        if (cofreRobadoConfirmado) return; // ya se sabe que el cofre fue robado, no tiene sentido comprobarlo de nuevo
+        if (puntoEntrada == null)
+        {
+            Debug.LogWarning($"[{name}] Ladrón avistado pero puntoEntrada no asignado — protocolo cancelado.");
+            return;
+        }
+        Debug.Log($"[{name}] Ladrón avistado — iniciando ContractNet '{tareaLadron}'.");
+        LanzarProtocolo(tareaLadron);
+    }
 
+private void LanzarProtocolo(string tarea)
+    {
         destinatariosRequest.Clear();
         foreach (AgenteFIPAACL a in AgenteFIPAACL.Todos)
         {
@@ -96,13 +110,24 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
             return;
         }
 
-        convIdActual = social.EnviarRequest(tareaCofre, destinatariosRequest);
+        tareaActual = tarea;
+        convIdActual = social.EnviarRequest(tarea, destinatariosRequest);
         voluntarios.Clear();
         respuestasEsperadas = destinatariosRequest.Count;
         respuestasRecibidas = 0;
         deadlineFase = Time.time + timeoutFase;
         estado = Estado.INIT_WAIT_RESPONSES;
     }
+
+    private void OnTimerExpired()
+    {
+        if (estado != Estado.IDLE) return;
+        if (cofre == null) return;
+        if (cofreRobadoConfirmado) return;
+
+        LanzarProtocolo(tareaCofre);
+    }
+
 
     private void OnRequestResponseReceived(string from, bool acepto, string convId)
     {
@@ -127,7 +152,8 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
             return;
         }
 
-        social.EnviarCFP(convIdActual, voluntarios, cofre.position, tareaCofre);
+        Vector3 posicionCFP = (tareaActual == tareaLadron) ? puntoEntrada.position : cofre.position;
+        social.EnviarCFP(convIdActual, voluntarios, posicionCFP, tareaActual);
         proposalAgents.Clear();
         proposalCostes.Clear();
         propuestasEsperadas = voluntarios.Count;

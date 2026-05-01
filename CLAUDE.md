@@ -84,7 +84,7 @@ Assets/Scripts/
 | `Control/ControlSubsystem.cs` | Arbiter — calls both layers, picks winner via inhibition rule |
 | `Control/ActionProposal.cs` | Plain C# data object passed between layers and actuator |
 | `Reactive/ReactiveLayer.cs` | Abstract base — subclass per guard type |
-| `Reactive/PatrolReactiveLayer.cs` | Patrol guard: Attack > Chase > WatchExit > Investigate > FollowGuard > Patrol priority chain; expone propiedad `Patrol` para que la deliberativa acceda al behaviour |
+| `Reactive/PatrolReactiveLayer.cs` | Patrol guard: Attack > Chase > Investigate > FollowGuard > Patrol priority chain; expone propiedad `Patrol` para que la deliberativa acceda al behaviour |
 | `Reactive/GuardianReactiveLayer.cs` | Static guard: Attack > Chase > Investigate > FollowGuard > Watch priority chain |
 | `Deliberative/DeliberativeLayer.cs` | Abstract base — subclass to add deliberative planning |
 | `Deliberative/PatrolDeliberativeLayer.cs` | [Mejora 7c] FSM ContractNet completa (iniciador y participante); sin lenguaje ACL; obtiene `patrolBehaviour` en `Start()` para evitar problemas de orden de inicialización; activa modo alerta al recibir INFORM de cofre robado |
@@ -614,53 +614,41 @@ Al llegar a la posición del avistamiento, `MovementSensor.OnDestinoAlcanzado` d
 
 ---
 
-## Mejora 9 — Alerta de intrusión desde guardia estático
+## Mejora 9 — Alerta de intrusión desde guardia estático ✓
 
-Cuando un guardia estático avista al ladrón, lanza un protocolo Contract Net con tarea `"ladronAvistado"` hacia todos los patrulleros. El iniciador es el guardián; los participantes son los patrulleros disponibles. El ganador (el más cercano a la posición del ladrón) se dirige a esa zona usando `GoToPositionBehaviour` ya existente.
+Cuando un guardia estático avista al ladrón, lanza un protocolo Contract Net con tarea `"ladronAvistado"` hacia todos los patrulleros. El ganador (el más cercano al `puntoEntrada`) se dirige a esa posición usando `GoToPositionBehaviour`. Al llegar recalcula su ruta de patrulla desde allí, quedándose a vigilar esa zona indefinidamente.
 
-**Motivación:** actualmente los guardias de la puerta detectan al ladrón de forma puramente local (chase/attack reactivo) sin comunicar nada al interior del castillo. Este comportamiento introduce coordinación real entre guardias estáticos y patrulleros mediante el protocolo ya establecido.
+**Motivación:** los guardianes detectan al ladrón reactivamente (chase/attack) pero no comunicaban nada al interior. Con esta mejora coordinan con los patrulleros mediante el protocolo ya establecido.
 
-**Importante:** toda comunicación entre agentes en este proyecto usa el protocolo Contract Net completo (REQUEST → AGREE/REFUSE → CFP → PROPOSE → ACCEPT/REJECT → INFORM_RESULT). No se usan broadcasts INFORM aislados fuera del protocolo. El `BroadcastInform` existente en `SkeletonSocialLayer` solo se usa como paso final de cierre dentro de una conversación Contract Net ya concluida.
+**Decisión de diseño — `puntoEntrada` en vez de posición del ladrón:** la posición exacta del ladrón puede estar fuera del NavMesh de los patrulleros (exterior del castillo). Cada `GuardianDeliberativeLayer` tiene un `Transform puntoEntrada` serializado en el Inspector — un GameObject vacío colocado dentro del NavMesh cerca de la puerta — que se usa como `posicionReferencia` en el CFP.
 
-**Trigger:** `GuardianDeliberativeLayer` suscribe a `VisionSensor.OnLadronAvistado`. Al detectarlo, si no hay ya una conversación activa para esta tarea, lanza el protocolo.
-
-**Payload del CFP:** posición del ladrón en el momento del avistamiento (`sensor.PosicionLadron`), igual que el CFP de avistamiento de cámara — reutiliza `ContentCFP` sin cambios.
-
-**Puntos de implementación:**
-- `GuardianDeliberativeLayer`: suscribir a `VisionSensor.OnLadronAvistado`; añadir estados `INIT_WAIT_RESPONSES`, `INIT_WAIT_PROPOSALS`, `INIT_WAIT_RESULT` para la tarea `"ladronAvistado"` (ya los tiene para `comprobarCofre`, se reutiliza la misma FSM con `tareaActual`).
-- `PatrolDeliberativeLayer`: aceptar la tarea `"ladronAvistado"` en `OnRequestReceived`; al ganar, activar `GoToPositionBehaviour` con la posición recibida en el CFP (igual que `investigarAvistamiento`).
+**Implementación:**
+- `GuardianDeliberativeLayer`: campo `[SerializeField] Transform puntoEntrada`; suscribe a `VisionSensor.OnLadronAvistado` en `Awake()`; método `LanzarProtocolo(string tarea)` centraliza el lanzamiento del REQUEST (reutilizado por timer y avistamiento); `tareaActual` determina qué posición usar en el CFP (`puntoEntrada.position` para `ladronAvistado`, `cofre.position` para `comprobarCofre`).
+- `PatrolDeliberativeLayer`: acepta `"ladronAvistado"` en `OnRequestReceived`; lo trata exactamente igual que `"investigarAvistamiento"` (activa `GoToPositionBehaviour`, usa `tareaActual` en `InformarResultado` y `BroadcastInform`).
 - No se necesitan ficheros nuevos ni cambios en la capa social.
 
-**Posibles consecuencias para el patrullero ganador al llegar:**
-
-- **Opción A — Redirigir patrulla:** el patrullero llega, notifica con `INFORM_RESULT` y vuelve a patrullar normalmente. El efecto es que el patrullero más cercano ha inspeccionado la zona de entrada.
-- **Opción B — Guardia temporal:** el patrullero se queda vigilando esa posición unos segundos (mini-`WatchBehaviour` temporal) antes de volver a patrullar, dejando cubierta la zona de intrusión.
-- **Opción C — Modo alerta con velocidad:** cualquiera de las anteriores, pero el `INFORM_RESULT` de cierre desencadena que todos los patrulleros aumenten su velocidad de patrulla temporalmente (mismo mecanismo que la alerta del cofre robado).
-
-**Nota de implementación:** si se añaden nuevas tareas al protocolo Contract Net, `InformarResultado` ya acepta `tarea` como parámetro. El único punto que requeriría cambio es `EnviarCFP` si la nueva tarea necesitara un payload de CFP distinto a `posicionReferencia`.
+**Configuración en Unity:** crear un GameObject vacío dentro del NavMesh cerca de la puerta y asignarlo al campo `Punto Entrada` de cada `GuardianDeliberativeLayer`.
 
 ---
 
-## Mejora 10 — Bloqueo de salida al detectar el robo
+## Mejora 10 — Bloqueo de salida al detectar el robo ✓
 
-Cuando un guardia detecta que el cofre ha sido robado (`VisionSensor.OnCofresDesaparecido`), lanza un Contract Net con tarea `"bloquearSalida"`. El ganador (el patrullero más cercano a la zona de salida) se desplaza allí y la custodia, cortando la ruta de huida del ladrón.
+Cuando un patrullero detecta que el cofre fue robado (`VisionSensor.OnCofresDesaparecido`), lanza un Contract Net con tarea `"bloquearSalida"`. El ganador (el más cercano a la zona de salida) se dirige allí usando `GoToPositionBehaviour` y al llegar recalcula su ruta de patrulla desde esa posición, quedándose a vigilar la salida indefinidamente.
 
-**Importante:** misma regla que el resto — Contract Net completo, sin broadcasts aislados.
+**Decisiones de diseño:**
+- Solo `PatrolDeliberativeLayer` inicia el protocolo — el guardián estático no tiene sentido que lo haga ya que no puede moverse ni ir a la salida.
+- `WatchExitBehaviour` eliminado de `PatrolReactiveLayer` — era contradictorio con este protocolo (ambos reaccionaban al mismo evento y mandaban al guardia a la salida por vías distintas sin coordinarse).
 
-**Trigger:** `PatrolDeliberativeLayer` y `GuardianDeliberativeLayer` suscriben a `VisionSensor.OnCofresDesaparecido`. El primero que lo detecta inicia el protocolo; los demás que lo detecten a posteriori no relanzarán (flag `cofreRobadoConfirmado` ya existe en ambas clases).
+**Consecuencias de `OnCofresDesaparecido` en los patrulleros (dos efectos paralelos):**
+1. **Modo alerta** — todos los patrulleros suben velocidad via `ActivarModoAlerta()` al recibir el broadcast `INFORM` del ganador de `comprobarCofre`.
+2. **Bloqueo de salida** — el primer patrullero que detecta el robo lanza `bloquearSalida`; el más cercano a la salida se dirige allí.
 
-**Payload del CFP:** posición de la zona de salida (`zonaSalida.position`) como `posicionReferencia` en `ContentCFP`. Cada patrullero propone `coste = distancia(self, zonaSalida)` — gana el más cercano a la salida, no al cofre.
+**Implementación:**
+- `PatrolDeliberativeLayer`: campo `[SerializeField] Transform zonaSalida`; suscribe a `VisionSensor.OnCofresDesaparecido` en `Awake()`; lógica de iniciador extraída en `LanzarProtocoloIniciador(string tarea)` reutilizada por timer, `OnCofresDesaparecido` y futuras tareas; CFP usa `zonaSalida.position` para `bloquearSalida`, `cofre.position` para `comprobarCofre`; participante acepta `"bloquearSalida"` igual que `"investigarAvistamiento"`.
+- `GuardianDeliberativeLayer`: sin cambios para esta mejora.
+- `WatchExitBehaviour.cs`: eliminado.
 
-**Puntos de implementación:**
-- `PatrolDeliberativeLayer` / `GuardianDeliberativeLayer`: suscribir a `OnCofresDesaparecido`; al dispararse, si `estado == IDLE` y `!cofreRobadoConfirmado`, lanzar REQUEST con tarea `"bloquearSalida"`.
-- `PatrolDeliberativeLayer` como Participante: aceptar la tarea `"bloquearSalida"` en `OnRequestReceived`; al ganar, activar `GoToPositionBehaviour` con la posición de la salida.
-- Se necesita una referencia serializada a `zonaSalida` (Transform) en las capas deliberativas, o buscarla por tag (`"ZonaSalida"`).
-- Al llegar a la salida, el patrullero ganador puede quedarse en `WatchBehaviour` temporal (Opción B de Mejora 9) o simplemente volver a patrullar cerca.
-
-**Posibles consecuencias para el patrullero ganador al llegar a la salida:**
-- **Opción A — Custodia pasiva:** el patrullero patrulla en torno a la salida en lugar de su ruta original, reduciendo el área de patrulla al entorno de la puerta.
-- **Opción B — Vigilancia estática:** el patrullero se detiene en la salida y activa un `WatchBehaviour` temporal, bloqueando visualmente el paso.
-- **Opción C — Modo alerta global:** el `INFORM_RESULT` de cierre sube la velocidad de todos los patrulleros (igual que la alerta del cofre robado de Mejora 9).
+**Configuración en Unity:** asignar el Transform de `ZonaSalida` en el Inspector de cada `PatrolDeliberativeLayer`.
 
 ---
 

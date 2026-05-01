@@ -1,7 +1,7 @@
 using UnityEngine;
 
 // Reactive Layer para guardias patrulleros.
-// Prioridad: Attack > Chase > WatchExit > Investigate > FollowGuard > Patrol.
+// Prioridad: Attack > Chase > Investigate > FollowGuard > Patrol.
 public class PatrolReactiveLayer : ReactiveLayer
 {
     public float velocidadCorrer     = 5f;
@@ -11,12 +11,8 @@ public class PatrolReactiveLayer : ReactiveLayer
     public float aceleracionCaminar  = 2f;
     public float margenPared         = 1.5f;
 
-    [SerializeField] private Transform zonaSalida;
-    public float radioImprecisionSalida = 3f;
-
     private AttackBehaviour      attack;
     private ChaseBehaviour       chase;
-    private WatchExitBehaviour   watchExit;
     private InvestigateBehaviour investigate;
     private FollowGuardBehaviour followGuard;
     private PatrolBehaviour      patrol;
@@ -35,9 +31,6 @@ public class PatrolReactiveLayer : ReactiveLayer
         chase = new ChaseBehaviour { speed = velocidadCorrer, acceleration = aceleracionCorrer, stopDistance = distanciaAtaque };
         chase.Initialize(sensorVision);
 
-        watchExit = new WatchExitBehaviour { speed = velocidadCorrer, acceleration = aceleracionCorrer, radioImprecision = radioImprecisionSalida };
-        watchExit.Initialize(sensorVision, sensorMovimiento, zonaSalida);
-
         investigate = new InvestigateBehaviour { speed = velocidadCaminar, acceleration = aceleracionCaminar };
         investigate.Initialize(sensorEscucha, sensorVision);
 
@@ -50,5 +43,5 @@ public class PatrolReactiveLayer : ReactiveLayer
 
     // Se genera la propuesta según prioridad de la acción
     public override ActionProposal GenerarPropuesta() =>
-        attack.Evaluate() ?? chase.Evaluate() ?? watchExit.Evaluate() ?? investigate.Evaluate() ?? followGuard.Evaluate() ?? patrol.Evaluate();
+        attack.Evaluate() ?? chase.Evaluate() ?? investigate.Evaluate() ?? followGuard.Evaluate() ?? patrol.Evaluate();
 }
