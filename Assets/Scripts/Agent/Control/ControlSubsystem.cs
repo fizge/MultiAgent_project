@@ -1,7 +1,7 @@
 using UnityEngine;
 
 // Este módulo actúa como el "Control Subsystem" del modelo TOURINGMACHINES.
-// Su objetivo es decidir qué capa de la IA (Reactiva o Deliberativa) toma el control del agente en cada fotograma.
+// Su objetivo es decidir qué capa de la IA (Reactiva o Deliberativa) toma el control del agente en cada frame.
 public class ControlSubsystem : MonoBehaviour
 {
     private ReactiveLayer capaReactiva;
@@ -10,7 +10,6 @@ public class ControlSubsystem : MonoBehaviour
 
     void Awake()
     {
-        // Al quitar el 'RequireComponent', es vital que estos tres scripts estén presentes en el Inspector.
         capaReactiva = GetComponent<ReactiveLayer>();
         capaDeliberativa = GetComponent<DeliberativeLayer>();
         actuador = GetComponent<AgentActuator>();

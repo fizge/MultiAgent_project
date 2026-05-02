@@ -1,37 +1,42 @@
-// FSM del protocolo FIPA Contract Net para guardias estáticos.
-// Solo actúa como Iniciador: nunca puede ir al cofre porque no se mueve, así que rechaza
-// cualquier REQUEST/CFP de otros Iniciadores. Su única función es lanzar conversaciones cuando
-// expira su timer y propagar el resultado final a todos los participantes.
+// Capa Deliberativa del guardia estático.
+// Solo actúa como Iniciador del protocolo Contract Net — nunca como Participante,
+// ya que el guardián no puede moverse y no tiene sentido que ejecute tareas de desplazamiento.
+// Gestiona dos tareas:
+//   - "comprobarCofre": lanzada por timer aleatorio para verificar que el cofre sigue intacto.
+//   - "ladronAvistado": lanzada cuando el sensor detecta al ladrón, para que un patrullero investigue la entrada.
 using System.Collections.Generic;
 using UnityEngine;
 
 public class GuardianDeliberativeLayer : DeliberativeLayer
 {
-    [SerializeField] private Transform cofre;
-    [SerializeField] private Transform puntoEntrada;
-    public float timeoutFase = 3f;
-    public string tareaCofre = "comprobarCofre";
-    private const string tareaLadron = "ladronAvistado";
+    [SerializeField] private Transform cofre;        // Referencia al cofre; necesaria para el CFP de comprobarCofre
+    [SerializeField] private Transform puntoEntrada; // Punto dentro del NavMesh cerca de la puerta; usado como destino en ladronAvistado
+    public float timeoutFase = 3f;                   // Segundos máximos de espera por fase del protocolo
+    public string tareaCofre = "comprobarCofre";     // Identificador de la tarea de comprobación periódica
+    private const string tareaLadron = "ladronAvistado"; // Identificador de la tarea de alerta de intrusión
 
-    private SkeletonSocialLayer social;
-    private VisionSensor visionSensor;
-    private string tareaActual;
+    private SkeletonSocialLayer social;  // Capa social: traduce entre la FSM y los mensajes ACL
+    private VisionSensor visionSensor;   // Sensor de visión: dispara OnLadronAvistado cuando ve al ladrón
+    private string tareaActual;          // Tarea en curso; determina qué posición usar en el CFP
 
+    // Estados de la FSM del Iniciador:
+    // IDLE → INIT_WAIT_RESPONSES → INIT_WAIT_PROPOSALS → INIT_WAIT_RESULT → IDLE
     private enum Estado
     {
         IDLE,
-        INIT_WAIT_RESPONSES,
-        INIT_WAIT_PROPOSALS,
-        INIT_WAIT_RESULT
+        INIT_WAIT_RESPONSES,  // REQUEST enviado; esperando AGREE/REFUSE de los patrulleros
+        INIT_WAIT_PROPOSALS,  // CFP enviado a voluntarios; esperando PROPOSE con costes
+        INIT_WAIT_RESULT      // ACCEPT_PROPOSAL enviado al ganador; esperando INFORM_RESULT
     }
 
     private Estado estado = Estado.IDLE;
-    private string convIdActual;
-    private float deadlineFase;
+    private string convIdActual;  // GUID compartido por todos los mensajes de la misma conversación
+    private float deadlineFase;   // Tiempo absoluto (Time.time) en que expira la fase actual
 
-    // Flag que evita relanzar el Contract Net una vez confirmado que el cofre fue robado.
+    // Flag que evita relanzar el Contract Net de comprobarCofre una vez confirmado el robo.
     private bool cofreRobadoConfirmado;
 
+    // Listas para acumular respuestas a lo largo del protocolo
     private List<AgenteFIPAACL> destinatariosRequest = new List<AgenteFIPAACL>();
     private List<AgenteFIPAACL> voluntarios = new List<AgenteFIPAACL>();
     private Dictionary<string, AgenteFIPAACL> proposalAgents = new Dictionary<string, AgenteFIPAACL>();
@@ -45,8 +50,11 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
     {
         social = GetComponent<SkeletonSocialLayer>();
         visionSensor = GetComponent<VisionSensor>();
+
+        // Suscripción al sensor de visión para detectar al ladrón
         if (visionSensor != null) visionSensor.OnLadronAvistado += OnLadronAvistado;
 
+        // Suscripción a los eventos de la capa social
         social.OnTimerExpired += OnTimerExpired;
         social.OnRequestReceived += OnRequestReceived;
         social.OnRequestResponseReceived += OnRequestResponseReceived;
@@ -57,6 +65,7 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
         social.OnCancellationReceived += OnCancellationReceived;
     }
 
+    // Comprueba en cada frame si ha expirado el deadline de la fase actual.
     void Update()
     {
         if (estado == Estado.IDLE) return;
@@ -65,24 +74,28 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
         switch (estado)
         {
             case Estado.INIT_WAIT_RESPONSES:
+                // Deadline de REQUEST: procesamos las respuestas recibidas hasta ahora
                 FinDeRecogidaDeRespuestas();
                 break;
             case Estado.INIT_WAIT_PROPOSALS:
+                // Deadline de CFP: procesamos las propuestas recibidas hasta ahora
                 FinDeRecogidaDePropuestas();
                 break;
             case Estado.INIT_WAIT_RESULT:
-                // El ganador no respondió a tiempo: cerramos la conversación y reiniciamos timer.
+                // El ganador no respondió a tiempo: cerramos la conversación y reiniciamos timer
                 FinalizarConversacionIniciador();
                 social.ReiniciarTimer();
                 break;
         }
     }
 
-    // El guardián estático nunca propone movimiento desde la Deliberativa.
+    // El guardián estático nunca propone movimiento — GenerarPropuesta siempre devuelve null.
     public override ActionProposal GenerarPropuesta() => null;
 
     // -------------------- Iniciador --------------------
 
+    // Disparado por VisionSensor cuando el ladrón entra en el campo de visión.
+    // Lanza el protocolo ladronAvistado para que el patrullero más cercano al puntoEntrada investigue.
     private void OnLadronAvistado()
     {
         if (estado != Estado.IDLE) return;
@@ -95,7 +108,9 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
         LanzarProtocolo(tareaLadron);
     }
 
-private void LanzarProtocolo(string tarea)
+    // Centraliza el lanzamiento de cualquier protocolo Contract Net como Iniciador.
+    // Recoge todos los esqueletos del registro global, envía REQUEST y espera respuestas.
+    private void LanzarProtocolo(string tarea)
     {
         destinatariosRequest.Clear();
         foreach (AgenteFIPAACL a in AgenteFIPAACL.Todos)
@@ -119,16 +134,18 @@ private void LanzarProtocolo(string tarea)
         estado = Estado.INIT_WAIT_RESPONSES;
     }
 
+    // Disparado por SkeletonSocialLayer cuando expira el timer aleatorio.
+    // Lanza el protocolo comprobarCofre si el cofre no ha sido robado previamente.
     private void OnTimerExpired()
     {
         if (estado != Estado.IDLE) return;
         if (cofre == null) return;
-        if (cofreRobadoConfirmado) return;
+        if (cofreRobadoConfirmado) return; // ya se sabe que el cofre fue robado, no tiene sentido comprobarlo
 
         LanzarProtocolo(tareaCofre);
     }
 
-
+    // Recibe cada AGREE o REFUSE al REQUEST. Acumula voluntarios y avanza cuando llegan todas las respuestas.
     private void OnRequestResponseReceived(string from, bool acepto, string convId)
     {
         if (estado != Estado.INIT_WAIT_RESPONSES || convId != convIdActual) return;
@@ -143,6 +160,9 @@ private void LanzarProtocolo(string tarea)
         if (respuestasRecibidas >= respuestasEsperadas) FinDeRecogidaDeRespuestas();
     }
 
+    // Fase 1: envía CFP a los voluntarios.
+    // La posición de referencia depende de la tarea: puntoEntrada para ladronAvistado, cofre para comprobarCofre.
+    // Si nadie aceptó, cancela el protocolo y reinicia el timer.
     private void FinDeRecogidaDeRespuestas()
     {
         if (voluntarios.Count == 0)
@@ -162,6 +182,7 @@ private void LanzarProtocolo(string tarea)
         estado = Estado.INIT_WAIT_PROPOSALS;
     }
 
+    // Recibe cada PROPOSE con el coste (distancia al punto de referencia) del candidato.
     private void OnProposalReceived(string from, float coste, string convId)
     {
         if (estado != Estado.INIT_WAIT_PROPOSALS || convId != convIdActual) return;
@@ -177,6 +198,8 @@ private void LanzarProtocolo(string tarea)
         if (propuestasRecibidas >= propuestasEsperadas) FinDeRecogidaDePropuestas();
     }
 
+    // Selecciona al candidato con menor coste, le envía ACCEPT_PROPOSAL y rechaza al resto.
+    // Si no llegó ninguna propuesta, cancela el protocolo.
     private void FinDeRecogidaDePropuestas()
     {
         if (proposalCostes.Count == 0)
@@ -186,7 +209,7 @@ private void LanzarProtocolo(string tarea)
             return;
         }
 
-        // Selecciona la propuesta de menor coste (distancia al cofre).
+        // Selección del ganador: menor distancia al punto de referencia
         string ganadorId = null;
         float mejorCoste = float.MaxValue;
         foreach (KeyValuePair<string, float> kv in proposalCostes)
@@ -203,10 +226,11 @@ private void LanzarProtocolo(string tarea)
         foreach (KeyValuePair<string, AgenteFIPAACL> kv in proposalAgents)
             if (kv.Key != ganadorId) social.RechazarPropuesta(convIdActual, kv.Value);
 
-        deadlineFase = Time.time + timeoutFase * 4f; // la ejecución del cofre puede ser larga
+        deadlineFase = Time.time + timeoutFase * 4f; // timeout generoso: el ganador debe desplazarse físicamente
         estado = Estado.INIT_WAIT_RESULT;
     }
 
+    // El ganador no pudo completar la tarea: cerramos la conversación y reiniciamos el timer.
     private void OnFailureReceived(string convId)
     {
         if (estado != Estado.INIT_WAIT_RESULT || convId != convIdActual) return;
@@ -216,38 +240,37 @@ private void LanzarProtocolo(string tarea)
 
     // -------------------- Como receptor de REQUEST/CFP de otro Iniciador --------------------
 
-    // El guardián estático nunca puede ir al cofre, así que siempre responde REFUSE.
+    // El guardián nunca puede moverse, así que siempre responde REFUSE a cualquier REQUEST entrante.
     private void OnRequestReceived(string from, string tarea, string convId)
     {
         AgenteFIPAACL iniciador = BuscarAgentePorId(from);
         if (iniciador != null) social.ResponderRequest(convId, false, iniciador);
     }
 
-    // No debería ocurrir (no respondemos AGREE, así que no nos llega un CFP), pero por defensa rechazamos.
+    // No debería ocurrir (no respondemos AGREE, así que no nos debería llegar un CFP), pero rechazamos por defensa.
     private void OnCFPReceived(string from, string tarea, Vector3 refPos, string convId)
     {
         AgenteFIPAACL iniciador = BuscarAgentePorId(from);
         if (iniciador != null) social.Rechazar(convId, iniciador);
     }
 
-    // -------------------- Resultados y alerta --------------------
+    // -------------------- Resultado de la conversación --------------------
 
+    // Recibe INFORM_RESULT del patrullero ganador cuando completa la tarea.
+    // Solo cierra la FSM: el ganador ya ha hecho el broadcast INFORM a todos los patrulleros.
     private void OnResultReceived(string from, bool exito, object datos, string convId)
     {
-        // Soy el Iniciador: recibo INFORM_RESULT del ganador. Solo cierro la FSM.
-        // El ganador ya ha hecho el broadcast INFORM a todos los patrulleros.
         if (estado == Estado.INIT_WAIT_RESULT && convId == convIdActual)
         {
-            if (!exito) cofreRobadoConfirmado = true; // evita relanzar el Contract Net en el futuro
+            if (!exito) cofreRobadoConfirmado = true; // el cofre fue robado: no tiene sentido seguir comprobando
             FinalizarConversacionIniciador();
         }
     }
 
-    private void OnCancellationReceived(string convId)
-    {
-        // Sin estado de Participante, no hay nada que cancelar localmente.
-    }
+    // El guardián no tiene estado de Participante, así que no hay nada que cancelar localmente.
+    private void OnCancellationReceived(string convId) { }
 
+    // Resetea la FSM al estado inicial y limpia todas las listas de la conversación.
     private void FinalizarConversacionIniciador()
     {
         estado = Estado.IDLE;
@@ -258,6 +281,7 @@ private void LanzarProtocolo(string tarea)
         proposalCostes.Clear();
     }
 
+    // Busca un agente en el registro global por su identificador de nombre.
     private static AgenteFIPAACL BuscarAgentePorId(string id)
     {
         foreach (AgenteFIPAACL a in AgenteFIPAACL.Todos)

@@ -1,52 +1,65 @@
-// FSM del protocolo FIPA Contract Net para guardias patrulleros.
-// Puede actuar como Iniciador (cuando expira su timer) y como Participante (cuando recibe REQUEST/CFP).
-// No conoce el lenguaje ACL: solo llama métodos de SkeletonSocialLayer y reacciona a sus eventos.
+// Capa Deliberativa del guardia patrullero.
+// Puede actuar como Iniciador (cuando expira su timer o detecta un evento) y como Participante
+// (cuando recibe un REQUEST de otro Iniciador). No conoce el lenguaje ACL: solo llama métodos
+// de SkeletonSocialLayer y reacciona a sus eventos.
+//
+// Tareas gestionadas:
+//   - "comprobarCofre"       : iniciada por timer; el más cercano al cofre comprueba su estado.
+//   - "bloquearSalida"       : iniciada al detectar el robo del cofre; el más cercano a la salida la custodia.
+//   - "investigarAvistamiento": participante; responde a la cámara cuando avista al ladrón.
+//   - "ladronAvistado"       : participante; responde al guardián estático cuando avista al ladrón.
+//   - "busquedaCoordinada"   : coordinación emergente via INFORM (sin Contract Net); cada patrullero
+//                              va a un sector distinto alrededor del último punto conocido del ladrón.
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
 public class PatrolDeliberativeLayer : DeliberativeLayer
 {
-    [SerializeField] private Transform cofre;
-    [SerializeField] private Transform zonaSalida;
-    public float velocidadComprobacion = 4f;
+    [SerializeField] private Transform cofre;      // Referencia al cofre; destino del CFP en comprobarCofre
+    [SerializeField] private Transform zonaSalida; // Referencia a la zona de salida; destino del CFP en bloquearSalida
+    public float velocidadComprobacion = 4f;       // Velocidad usada por CheckChestBehaviour y GoToPositionBehaviour
     public float aceleracionComprobacion = 2f;
-    public float toleranciaCofre = 2f;
-    public float timeoutFase = 3f; // segundos máximos de espera por fase del protocolo
+    public float toleranciaCofre = 2f;             // Radio de llegada válida al cofre (filtra llegadas espurias)
+    public float timeoutFase = 3f;                 // Segundos máximos de espera por fase del protocolo
+    public float radioBusqueda = 8f;               // Radio desde el último punto conocido para calcular destinos de búsqueda
+
     public string tareaCofre = "comprobarCofre";
     private const string tareaAvistamiento = "investigarAvistamiento";
     private const string tareaLadron = "ladronAvistado";
     private const string tareaBloqueo = "bloquearSalida";
     private const string tareaBusqueda = "busquedaCoordinada";
-    public float radioBusqueda = 8f;
 
-    private SkeletonSocialLayer social;
-    private VisionSensor visionSensor;
-    private CheckChestBehaviour checkChest;
-    private GoToPositionBehaviour goToPos;
-    private PatrolBehaviour patrolBehaviour;
+    private SkeletonSocialLayer social;      // Capa social: traduce entre FSM y mensajes ACL
+    private VisionSensor visionSensor;       // Sensor de visión: dispara eventos de cofre y ladrón
+    private CheckChestBehaviour checkChest;  // Behaviour activo cuando el agente gana el contrato comprobarCofre
+    private GoToPositionBehaviour goToPos;   // Behaviour activo para tareas de desplazamiento a posición arbitraria
+    private PatrolBehaviour patrolBehaviour; // Referencia al behaviour de patrulla para activar modo alerta
 
-    // La capa deliberativa no sabe quá tarea está ejecutando hasta que recibe el request,
-    // pero lo guarda para decidir qué comportamiento activar al aceptar la propuesta
-    private string tareaActual; 
-    private Vector3 posicionInvestigacion;
+    // Tarea que está ejecutando actualmente el agente (como Participante o en búsqueda coordinada).
+    // Determina qué behaviour activar y qué posición usar.
+    private string tareaActual;
+    private Vector3 posicionInvestigacion; // Posición recibida en el CFP; destino del GoToPositionBehaviour
 
+    // Estados de la FSM:
+    // Como Iniciador:    IDLE → INIT_WAIT_RESPONSES → INIT_WAIT_PROPOSALS → INIT_WAIT_RESULT → IDLE
+    // Como Participante: IDLE → PART_VOLUNTEERED → PART_PROPOSED → PART_EXECUTING → IDLE
     private enum Estado
     {
         IDLE,
-        INIT_WAIT_RESPONSES,   // iniciador esperando AGREE/REFUSE al REQUEST
-        INIT_WAIT_PROPOSALS,   // iniciador esperando PROPOSE al CFP
-        INIT_WAIT_RESULT,      // iniciador esperando INFORM_RESULT del ganador
-        PART_VOLUNTEERED,      // participante: respondió AGREE, esperando CFP
-        PART_PROPOSED,         // participante: envió PROPOSE, esperando ACCEPT/REJECT
-        PART_EXECUTING         // participante: ganó, ejecutando CheckChestBehaviour
+        INIT_WAIT_RESPONSES,   // Iniciador: REQUEST enviado, esperando AGREE/REFUSE
+        INIT_WAIT_PROPOSALS,   // Iniciador: CFP enviado, esperando PROPOSE
+        INIT_WAIT_RESULT,      // Iniciador: ACCEPT_PROPOSAL enviado, esperando INFORM_RESULT del ganador
+        PART_VOLUNTEERED,      // Participante: respondió AGREE, esperando CFP
+        PART_PROPOSED,         // Participante: envió PROPOSE, esperando ACCEPT/REJECT
+        PART_EXECUTING         // Participante: ganó, ejecutando CheckChestBehaviour o GoToPositionBehaviour según la tarea
     }
 
     private Estado estado = Estado.IDLE;
-    private string convIdActual;
-    private float deadlineFase;
+    private string convIdActual;  // GUID compartido por todos los mensajes de la misma conversación
+    private float deadlineFase;   // Tiempo absoluto (Time.time) en que expira la fase actual
 
-    // Estado del Iniciador
+    // Listas del Iniciador para acumular respuestas a lo largo del protocolo
     private List<AgenteFIPAACL> destinatariosRequest = new List<AgenteFIPAACL>();
     private List<AgenteFIPAACL> voluntarios = new List<AgenteFIPAACL>();
     private Dictionary<string, AgenteFIPAACL> proposalAgents = new Dictionary<string, AgenteFIPAACL>();
@@ -56,12 +69,14 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     private int propuestasEsperadas;
     private int propuestasRecibidas;
 
-    // Estado del Participante
+    // Referencia al iniciador de la conversación actual (solo cuando este agente es Participante)
     private AgenteFIPAACL iniciadorActual;
 
-    // Flag que evita relanzar el Contract Net una vez confirmado que el cofre fue robado.
+    // Flag que evita relanzar el Contract Net de comprobarCofre o bloquearSalida una vez confirmado el robo.
     private bool cofreRobadoConfirmado;
 
+
+    // Se ejecuta después de todos los Awake: garantiza que PatrolReactiveLayer ya inicializó patrol.
     void Start()
     {
         patrolBehaviour = GetComponent<PatrolReactiveLayer>().Patrol;
@@ -71,10 +86,14 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
     {
         social = GetComponent<SkeletonSocialLayer>();
         visionSensor = GetComponent<VisionSensor>();
+
+        // Suscripción a eventos del sensor de visión
         visionSensor.OnCofresDesaparecido += OnCofresDesaparecido;
         visionSensor.OnLadronPerdido += OnLadronPerdido;
+
         MovementSensor mov = GetComponent<MovementSensor>();
 
+        // CheckChestBehaviour: va al cofre y comprueba si fue robado
         checkChest = new CheckChestBehaviour
         {
             speed = velocidadComprobacion,
@@ -84,6 +103,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         checkChest.Initialize(transform, cofre, mov, visionSensor);
         checkChest.OnComprobacionCompletada += OnCheckChestCompletado;
 
+        // GoToPositionBehaviour: se dirige a una posición arbitraria (avistamiento, entrada, salida, sector)
         goToPos = new GoToPositionBehaviour
         {
             speed = velocidadComprobacion,
@@ -92,6 +112,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         goToPos.Initialize(transform, mov);
         goToPos.OnLlegadaCompletada += OnInvestigacionCompletada;
 
+        // Suscripción a los eventos de la capa social
         social.OnTimerExpired += OnTimerExpired;
         social.OnRequestReceived += OnRequestReceived;
         social.OnRequestResponseReceived += OnRequestResponseReceived;
@@ -106,9 +127,10 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         social.OnCancellationReceived += OnCancellationReceived;
     }
 
+    // Comprueba en cada frame si ha expirado el deadline de la fase actual.
+    // IDLE y PART_EXECUTING no tienen deadline: no caducan.
     void Update()
     {
-        // Solo los estados de espera tienen deadline. PART_EXECUTING e IDLE no caducan.
         if (estado == Estado.IDLE || estado == Estado.PART_EXECUTING) return;
         if (Time.time < deadlineFase) return;
 
@@ -121,28 +143,33 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
                 FinDeRecogidaDePropuestas();
                 break;
             case Estado.INIT_WAIT_RESULT:
-                // El ganador no respondió a tiempo: cerramos la conversación y reiniciamos timer.
+                // El ganador no respondió a tiempo: cerramos la conversación y reiniciamos timer
                 FinalizarConversacionIniciador();
                 social.ReiniciarTimer();
                 break;
             case Estado.PART_VOLUNTEERED:
             case Estado.PART_PROPOSED:
-                // El iniciador no contestó: abortamos localmente y reiniciamos timer.
+                // El iniciador no contestó: abortamos localmente y reiniciamos timer
                 ResetParticipante();
                 social.ReiniciarTimer();
                 break;
         }
     }
 
+    // Devuelve ActionProposal solo cuando el agente está ejecutando una tarea como Participante.
+    // El behaviour concreto depende de la tarea activa.
     public override ActionProposal GenerarPropuesta()
     {
         if (estado != Estado.PART_EXECUTING) return null;
-        if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo || tareaActual == tareaBusqueda) return goToPos.Evaluate();
+        if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo || tareaActual == tareaBusqueda)
+            return goToPos.Evaluate();
         return checkChest.Evaluate();
     }
 
     // -------------------- Iniciador --------------------
 
+    // Disparado por SkeletonSocialLayer cuando expira el timer aleatorio.
+    // Lanza el protocolo comprobarCofre si el cofre existe y no ha sido robado previamente.
     private void OnTimerExpired()
     {
         if (estado != Estado.IDLE) return;
@@ -151,6 +178,8 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         LanzarProtocoloIniciador(tareaCofre);
     }
 
+    // Disparado por VisionSensor cuando el cofre desaparece del campo de visión del agente.
+    // Lanza el protocolo bloquearSalida para que el patrullero más cercano a la salida la custodie.
     private void OnCofresDesaparecido()
     {
         if (estado != Estado.IDLE) return;
@@ -164,6 +193,8 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         LanzarProtocoloIniciador(tareaBloqueo);
     }
 
+    // Disparado por VisionSensor cuando el ladrón se pierde de vista.
+    // Emite INFORM de búsqueda coordinada a todos los patrulleros y va a su propio sector.
     private void OnLadronPerdido()
     {
         if (estado != Estado.IDLE) return;
@@ -172,12 +203,17 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         IrASector(visionSensor.PosicionLadron);
     }
 
+    // Disparado por SkeletonSocialLayer al recibir un INFORM de búsqueda coordinada de otro patrullero.
+    // El agente va a su sector correspondiente alrededor del último punto conocido.
     private void OnBusquedaCoordinadaReceived(Vector3 ultimaPosicion)
     {
         if (estado != Estado.IDLE) return;
         IrASector(ultimaPosicion);
     }
 
+    // Calcula el sector de búsqueda propio usando el índice del agente en la lista de patrulleros.
+    // Divide 360° entre el número total de patrulleros y asigna un ángulo a cada uno.
+    // El destino se corrige con NavMesh.SamplePosition para garantizar que está dentro del NavMesh.
     private void IrASector(Vector3 posicionReferencia)
     {
         List<AgenteFIPAACL> patrulleros = new List<AgenteFIPAACL>();
@@ -190,6 +226,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         Vector3 direccion = Quaternion.Euler(0, angulo, 0) * Vector3.forward;
         Vector3 candidato = posicionReferencia + direccion * radioBusqueda;
 
+        // Corrige el destino al punto válido más cercano del NavMesh
         NavMeshHit hit;
         Vector3 destino = NavMesh.SamplePosition(candidato, out hit, radioBusqueda, NavMesh.AllAreas)
             ? hit.position
@@ -201,6 +238,8 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         Debug.Log($"[{name}] Sector {angulo:F0}° → {destino}");
     }
 
+    // Centraliza el lanzamiento de cualquier protocolo Contract Net como Iniciador.
+    // Envía REQUEST a todos los esqueletos registrados y pasa a INIT_WAIT_RESPONSES.
     private void LanzarProtocoloIniciador(string tarea)
     {
         destinatariosRequest.Clear();
@@ -225,6 +264,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         tareaActual = tarea;
     }
 
+    // Recibe cada AGREE o REFUSE. Acumula voluntarios y avanza cuando llegan todas las respuestas.
     private void OnRequestResponseReceived(string from, bool acepto, string convId)
     {
         if (estado != Estado.INIT_WAIT_RESPONSES || convId != convIdActual) return;
@@ -239,11 +279,13 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         if (respuestasRecibidas >= respuestasEsperadas) FinDeRecogidaDeRespuestas();
     }
 
+    // Fase 1: envía CFP a los voluntarios.
+    // La posición de referencia depende de la tarea: zonaSalida para bloquearSalida, cofre para el resto.
+    // Si nadie aceptó, cancela el protocolo y reinicia el timer.
     private void FinDeRecogidaDeRespuestas()
     {
         if (voluntarios.Count == 0)
         {
-            // Nadie disponible: abortamos y reiniciamos timer.
             FinalizarConversacionIniciador();
             social.ReiniciarTimer();
             return;
@@ -259,6 +301,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         estado = Estado.INIT_WAIT_PROPOSALS;
     }
 
+    // Recibe cada PROPOSE con el coste (distancia al punto de referencia) del candidato.
     private void OnProposalReceived(string from, float coste, string convId)
     {
         if (estado != Estado.INIT_WAIT_PROPOSALS || convId != convIdActual) return;
@@ -274,6 +317,8 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         if (propuestasRecibidas >= propuestasEsperadas) FinDeRecogidaDePropuestas();
     }
 
+    // Selecciona al candidato con menor coste, le envía ACCEPT_PROPOSAL y rechaza al resto.
+    // Si no llegó ninguna propuesta, cancela el protocolo.
     private void FinDeRecogidaDePropuestas()
     {
         if (proposalCostes.Count == 0)
@@ -283,7 +328,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
             return;
         }
 
-        // Selecciona la propuesta de menor coste.
+        // Selección del ganador: menor distancia al punto de referencia del CFP
         string ganadorId = null;
         float mejorCoste = float.MaxValue;
         foreach (KeyValuePair<string, float> kv in proposalCostes)
@@ -300,10 +345,11 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         foreach (KeyValuePair<string, AgenteFIPAACL> kv in proposalAgents)
             if (kv.Key != ganadorId) social.RechazarPropuesta(convIdActual, kv.Value);
 
-        deadlineFase = Time.time + timeoutFase * 4f;
+        deadlineFase = Time.time + timeoutFase * 4f; // timeout generoso: el ganador debe desplazarse físicamente
         estado = Estado.INIT_WAIT_RESULT;
     }
 
+    // El ganador no pudo completar la tarea: cerramos la conversación y reiniciamos el timer.
     private void OnFailureReceived(string convId)
     {
         if (estado != Estado.INIT_WAIT_RESULT || convId != convIdActual) return;
@@ -313,12 +359,15 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
 
     // -------------------- Participante --------------------
 
+    // Recibe REQUEST de otro Iniciador. Responde AGREE si está IDLE y la tarea es conocida, REFUSE si no.
     private void OnRequestReceived(string from, string tarea, string convId)
     {
         AgenteFIPAACL iniciador = BuscarAgentePorId(from);
         if (iniciador == null) return;
 
-        bool puedoAceptar = (estado == Estado.IDLE) && (tarea == tareaCofre || tarea == tareaAvistamiento || tarea == tareaLadron || tarea == tareaBloqueo);
+        bool puedoAceptar = (estado == Estado.IDLE) &&
+                            (tarea == tareaCofre || tarea == tareaAvistamiento ||
+                             tarea == tareaLadron || tarea == tareaBloqueo);
         social.ResponderRequest(convId, puedoAceptar, iniciador);
 
         if (puedoAceptar)
@@ -331,18 +380,21 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         }
     }
 
+    // Recibe CFP del Iniciador con la posición de referencia.
+    // Calcula el coste (distancia propia al punto) y envía PROPOSE.
+    // Si el CFP no corresponde a la conversación activa, rechaza.
     private void OnCFPReceived(string from, string tarea, Vector3 refPos, string convId)
     {
         if (estado != Estado.PART_VOLUNTEERED || convId != convIdActual)
         {
-            // CFP fuera de contexto: rechazamos.
             AgenteFIPAACL emisor = BuscarAgentePorId(from);
             if (emisor != null) social.Rechazar(convId, emisor);
             return;
         }
 
-        // Guarda la posición de investigación
-        if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo) posicionInvestigacion = refPos;
+        // Guarda la posición para activar GoToPositionBehaviour si ganamos
+        if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo)
+            posicionInvestigacion = refPos;
 
         float coste = Vector3.Distance(transform.position, refPos);
         social.EnviarPropuesta(convId, coste, iniciadorActual);
@@ -350,6 +402,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         estado = Estado.PART_PROPOSED;
     }
 
+    // Ganamos el contrato: activamos el behaviour correspondiente a la tarea.
     private void OnProposalAccepted(string convId)
     {
         if (estado != Estado.PART_PROPOSED || convId != convIdActual) return;
@@ -360,6 +413,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
             checkChest.Activar();
     }
 
+    // Perdimos el contrato: volvemos a IDLE sin ejecutar nada.
     private void OnProposalRejected(string convId)
     {
         if (convId != convIdActual) return;
@@ -367,12 +421,14 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
             ResetParticipante();
     }
 
+    // El Iniciador cancela la conversación: abortamos el behaviour activo y volvemos a IDLE.
     private void OnCancellationReceived(string convId)
     {
         if (convId != convIdActual) return;
         if (estado == Estado.PART_EXECUTING)
         {
-            if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron || tareaActual == tareaBloqueo || tareaActual == tareaBusqueda)
+            if (tareaActual == tareaAvistamiento || tareaActual == tareaLadron ||
+                tareaActual == tareaBloqueo || tareaActual == tareaBusqueda)
                 goToPos.Desactivar();
             else
                 checkChest.Desactivar();
@@ -380,31 +436,36 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         ResetParticipante();
     }
 
-    // Llamado por CheckChestBehaviour cuando el patrullero ganador llega al cofre.
+    // Llamado por CheckChestBehaviour cuando el patrullero llega al cofre y comprueba su estado.
+    // Notifica al Iniciador con INFORM_RESULT y hace broadcast INFORM a todos los patrulleros.
     private void OnCheckChestCompletado(bool cofreIntacto)
     {
         if (estado != Estado.PART_EXECUTING) return;
 
-        // Dentro del Contract Net: INFORM_RESULT solo al Iniciador.
+        // INFORM_RESULT al Iniciador (dentro del Contract Net)
         if (iniciadorActual != null)
-            social.InformarResultado(convIdActual, cofreIntacto, cofreIntacto ? "cofre intacto" : "cofre robado",
-                                      tareaCofre, new List<AgenteFIPAACL> { iniciadorActual });
+            social.InformarResultado(convIdActual, cofreIntacto,
+                cofreIntacto ? "cofre intacto" : "cofre robado",
+                tareaCofre, new List<AgenteFIPAACL> { iniciadorActual });
 
-        // Fuera del Contract Net: INFORM a todos los patrulleros (filtra cámaras y guardianes en BroadcastInform).
-        social.BroadcastInform(convIdActual, cofreIntacto, cofreIntacto ? "cofre intacto" : "cofre robado");
+        // INFORM a todos los patrulleros (fuera del Contract Net, para que reinicien sus timers)
+        social.BroadcastInform(convIdActual, cofreIntacto,
+            cofreIntacto ? "cofre intacto" : "cofre robado");
 
         ResetParticipante();
-        social.ReiniciarTimer(); // el ganador reinicia su timer al terminar la tarea
+        social.ReiniciarTimer();
     }
 
     // Llamado por GoToPositionBehaviour cuando el patrullero llega a su destino.
+    // Para búsqueda coordinada simplemente vuelve a patrullar (no hay Iniciador que notificar).
+    // Para el resto, notifica al Iniciador y hace broadcast a los demás patrulleros.
     private void OnInvestigacionCompletada()
     {
         if (estado != Estado.PART_EXECUTING) return;
 
         if (tareaActual == tareaBusqueda)
         {
-            // Búsqueda coordinada: no hay iniciador ni broadcast, simplemente volvemos a patrullar.
+            // Búsqueda coordinada: coordinación emergente sin Iniciador — solo volvemos a patrullar
             ResetParticipante();
             social.ReiniciarTimer();
             return;
@@ -413,7 +474,8 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         string resultado = tareaActual == tareaBloqueo ? "salida bloqueada" : "avistamiento investigado";
 
         if (iniciadorActual != null)
-            social.InformarResultado(convIdActual, true, resultado, tareaActual, new List<AgenteFIPAACL> { iniciadorActual });
+            social.InformarResultado(convIdActual, true, resultado,
+                tareaActual, new List<AgenteFIPAACL> { iniciadorActual });
 
         social.BroadcastInform(convIdActual, true, resultado, tareaActual);
 
@@ -423,15 +485,16 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
 
     // -------------------- Resultados y reacción a la alerta --------------------
 
+    // Soy el Iniciador: recibo INFORM_RESULT del ganador. Solo cierro la FSM.
+    // El ganador ya ha hecho el broadcast INFORM a todos los patrulleros.
     private void OnResultReceived(string from, bool exito, object datos, string convId)
     {
-        // Soy el Iniciador: recibo INFORM_RESULT del ganador. Solo cierro la FSM.
-        // El ganador ya ha hecho el broadcast INFORM a todos los demás.
         if (estado == Estado.INIT_WAIT_RESULT && convId == convIdActual)
             FinalizarConversacionIniciador();
     }
 
-    // Notificación externa al Contract Net: llega INFORM del ganador a todos los patrulleros.
+    // Notificación externa al Contract Net: el ganador de comprobarCofre informa a todos los patrulleros.
+    // Si el cofre fue robado, activa el modo alerta (velocidad aumentada) de forma permanente.
     private void OnInformReceived(string from, bool exito, object datos, string convId)
     {
         if (!exito)
@@ -444,6 +507,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
 
     // -------------------- Helpers de transición --------------------
 
+    // Resetea la FSM del Iniciador al estado inicial y limpia todas las listas de la conversación.
     private void FinalizarConversacionIniciador()
     {
         estado = Estado.IDLE;
@@ -454,6 +518,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         proposalCostes.Clear();
     }
 
+    // Resetea la FSM del Participante al estado inicial.
     private void ResetParticipante()
     {
         estado = Estado.IDLE;
@@ -462,6 +527,7 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         tareaActual = null;
     }
 
+    // Busca un agente en el registro global por su identificador de nombre.
     private static AgenteFIPAACL BuscarAgentePorId(string id)
     {
         foreach (AgenteFIPAACL a in AgenteFIPAACL.Todos)
