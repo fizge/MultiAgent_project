@@ -501,6 +501,8 @@ public class PatrolDeliberativeLayer : DeliberativeLayer
         {
             cofreRobadoConfirmado = true;
             patrolBehaviour.ActivarModoAlerta();
+            if (estado == Estado.IDLE && zonaSalida != null)
+                LanzarProtocoloIniciador(tareaBloqueo);
             Debug.Log($"[{name}] ALERTA: cofre robado — modo alerta activado (informado por {from}, conv={convId}).");
         }
     }

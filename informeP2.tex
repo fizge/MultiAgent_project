@@ -148,7 +148,7 @@ La capa deliberativa implementa la \textbf{máquina de estados (FSM)} del protoc
     \texttt{PART\_PROPOSED} (ha enviado su propuesta, esperando ACCEPT o REJECT\_PROPOSAL)
     y \texttt{PART\_EXECUTING} (ha ganado el contrato y está ejecutando el behaviour comprometido).
     Maneja las tareas \texttt{comprobarCofre}, \texttt{investigarAvistamiento},
-    \texttt{ladronAvistado}, \texttt{bloquearSalida} y busquedaCoordinada.
+    \texttt{ladronAvistado}, \texttt{bloquearSalida} y \texttt{busquedaCoordinada}.
 
     \item \texttt{GuardianDeliberativeLayer} actúa sólo como \textbf{Iniciador}, con los mismos
     estados \texttt{IDLE}, \texttt{INIT\_WAIT\_RESPONSES}, \texttt{INIT\_WAIT\_PROPOSALS} e
@@ -194,13 +194,13 @@ Heredado de la Práctica 1 con varias mejoras. Detecta al ladrón mediante dista
     \item \textbf{Escaneo del entorno} en 16 direcciones, usado por \texttt{PatrolBehaviour} para planificar rutas.
     \item \textbf{Detección de cambios en rejas dinámicas}: cada frame consulta la lista estática \texttt{DynamicBars.todas} y, si una reja visible cambia de estado, relanza \texttt{EscanearEntorno()} para que el patrullero replantee su ruta.
     \item \textbf{Comprobación del cofre}: cuando \texttt{GameManager.hasLoot == true} y el cofre está dentro del cono de visión, dispara \texttt{OnCofresDesaparecido} una sola vez. Esto se usa ahora en el patrullero para lanzar el protocolo \texttt{bloquearSalida}.
-    \item \textbf{Método público \texttt{ComprobarEstadoCofre()}} que devuelve \texttt{true} si el cofre sigue intacto, usado por \texttt{CheckChestBehaviour} respetando la arquitectura TM.
+    \item \textbf{Método público \texttt{ComprobarEstadoCofre()}} que devuelve \texttt{true} si el cofre sigue intacto, consultado por \texttt{CheckChestBehaviour} al llegar al cofre para determinar el resultado de la comprobación.
     \item \textbf{Robustez}: null-checks en \texttt{eyePoint}, \texttt{cofre} y \texttt{MovementSensor} para que pueda usarse en agentes que no tengan todos esos componentes.
     \item Re-escaneo automático al llegar a destino mediante suscripción \texttt{MovementSensor.\allowbreak OnDestinoAlcanzado}.
 \end{itemize}
 
 \paragraph{HearingSensor}
-Sensor nuevo en la práctica 2. Detecta emisores de ruido (\texttt{NoiseEmitter}) en un radio configurable, distingue al ladrón (tag \texttt{Ladron}) de otros guardias (tag \texttt{Esqueleto}) y aplica una imprecisión configurable a la posición percibida. Dispara \texttt{OnLadronEscuchado}, \texttt{OnEsqueletoEscuchado} y sus correspondientes eventos de pérdida.
+Heredado de la Práctica 1. Detecta emisores de ruido (\texttt{NoiseEmitter}) en un radio configurable, distingue al ladrón (tag \texttt{Ladron}) de otros guardias (tag \texttt{Esqueleto}) y aplica una imprecisión configurable a la posición percibida. Dispara \texttt{OnLadronEscuchado}, \texttt{OnEsqueletoEscuchado} y sus correspondientes eventos de pérdida.
 
 \paragraph{MovementSensor}
 Sin cambios. Monitoriza el \texttt{NavMeshAgent} y dispara \texttt{OnDestinoAlcanzado} cuando el agente llega a su destino con una tolerancia de 0.3 unidades. Es el evento clave que cierra los behaviours \texttt{CheckChestBehaviour} y \texttt{GoToPositionBehaviour}.
@@ -268,7 +268,7 @@ El sistema implementa el protocolo \textbf{FIPA Contract Net}. Una conversación
     \item \texttt{FAILURE}: se trata como un \texttt{INFORM\_RESULT} con \texttt{exito=false}.
     \item \texttt{CANCEL}: un Participante en \texttt{PART\_EXECUTING} aborta y vuelve a patrullar.
     \item Timeouts de fase (\texttt{timeoutFase}): cierran la conversación si no se reciben todas las respuestas a tiempo.
-    \item \texttt{INFORM} de búsqueda coordinada: cuando un patrullero pierde al ladrón, en lugar de usar Contract Net emite directamente un \texttt{INFORM} a todos los patrulleros con la última posición conocida. No hay negociación ni ganador único: todos los receptores (incluido el emisor, porque puede ser él el que está más cerca) calculan autónomamente su sector de búsqueda y se dirigen a él. Este uso del \texttt{INFORM} fuera del flujo Contract Net es deliberado: la coordinación emerge de las posiciones relativas sin necesidad de propuestas.
+    \item \texttt{INFORM} de búsqueda coordinada: cuando un patrullero pierde al ladrón, emite directamente un \texttt{INFORM} a todos los demás patrulleros con la última posición conocida, y él mismo calcula su propio sector sin esperar respuesta. No hay negociación ni ganador único: cada receptor calcula autónomamente su sector de búsqueda y se dirige a él. Este uso del \texttt{INFORM} fuera del flujo Contract Net es deliberado: la coordinación emerge de las posiciones relativas sin necesidad de propuestas.
 \end{itemize}
 
 Los mensajes se crean, envían y reciben a través de \texttt{AgenteFIPAACL}: la factoría \texttt{CrearMensaje} construye el \texttt{ACLMessage} con \texttt{sender} ya relleno y un GUID como \texttt{conversationId}. El envío es siempre \textbf{unicast} — el mensaje se deposita directamente en la cola \texttt{inbox} del destinatario. El multicast se realiza mediante bucles explícitos en la capa social. Cada agente drena su inbox en \texttt{Update} con un límite de \texttt{mensajesPorFrame} mensajes por frame, evitando congelar el juego ante avalanchas de mensajes.
@@ -352,7 +352,7 @@ La coordinación se implementa mediante dos mecanismos complementarios:
 
 \paragraph{Alerta desde guardia estático} Cuando un guardián exterior ve al ladrón, lanza \texttt{ladronAvistado} con la posición de su \texttt{puntoEntrada} (un Transform dentro del NavMesh). El patrullero más cercano se desplaza allí y queda patrullando esa zona, exactamente como en \texttt{investigarAvistamiento}.
 
-\paragraph{Bloqueo de la zona de salida} Al detectar el cofre robado por visión directa (\texttt{OnCofresDesaparecido}), un patrullero lanza \texttt{bloquearSalida} con la posición de la \texttt{ZonaSalida}. El más cercano va allí y queda patrullando la salida. Este efecto ocurre en paralelo al modo alerta: ambos coexisten porque uno surge del INFORM broadcast del Contract Net y el otro de la percepción directa.
+\paragraph{Bloqueo de la zona de salida} El protocolo \texttt{bloquearSalida} puede activarse por dos vías complementarias: por visión directa del cofre vacío (\texttt{OnCofresDesaparecido}) o al recibir el \texttt{INFORM} broadcast del ganador de \texttt{comprobarCofre} que confirma el robo. En ambos casos, el primer patrullero libre lanza el Contract Net con la posición de la \texttt{ZonaSalida}; el más cercano se desplaza allí y queda patrullando la salida. Este efecto ocurre en paralelo al modo alerta, que también se activa al recibir el mismo \texttt{INFORM} broadcast.
 
 \paragraph{Búsqueda coordinada tras perder al ladrón} Cuando un patrullero pierde al ladrón, emite un \texttt{INFORM} con la última posición conocida. Todos los patrulleros (incluido el emisor) calculan su sector de forma autónoma: consultan \texttt{AgenteFIPAACL.Todos}, obtienen su índice entre los patrulleros y se les asigna el ángulo $\textit{índice} \times (360 / \textit{total})$. El destino se corrige con \texttt{NavMesh.SamplePosition} para garantizar que cae dentro del NavMesh. Aquí se usa deliberadamente un \texttt{INFORM} en lugar de un Contract Net porque no hay un ganador único: todos participan con un sector distinto y la dispersión emerge de las posiciones relativas sin propuestas.
 
