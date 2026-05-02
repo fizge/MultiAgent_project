@@ -1,0 +1,187 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage{graphicx} 
+\usepackage{float}
+\usepackage{titlesec}
+
+% Formato de secciones principales
+\titleformat{\section}
+  {\normalfont\Large\bfseries}
+  {}
+  {0pt}
+  {}
+
+\titlespacing*{\section}
+  {0pt}{1.5em}{0.8em}
+
+\begin{document}
+
+\title{\vspace{-70pt}\begingroup  
+    \centering
+    \includegraphics[width=0.6\textwidth]{udc.png}\\
+    \large Grado en Intelixencia Artificial\\
+    \large Sistemas Multiaxente\\[0.5em]
+    \large \textbf{Práctica 1: Mundo virtual y comportamiento individual}\par 
+\endgroup}
+\author{Miguel Baños Baladrón \\ Fiz Garrido Escudero \\ Grupo Martes}
+
+\date{}
+\maketitle
+\vspace{-30pt}
+
+\tableofcontents
+\newpage
+
+
+% MUNDO VIRTUAL
+\section{Mundo Virtual}
+
+Nuestro entorno virtual se compone de dos zonas principales: un exterior abierto y un castillo en el centro, en el que ocurre la mayoría de la acción.
+
+El exterior consiste en un terreno llano cubierto de hierba y decorado con abundante vegetación, incluyendo árboles y arbustos. Esta zona rodea el castillo y es donde comienza la partida. El acceso al interior del castillo se realiza a través de una gran puerta principal, en la cual encontramos a los primeros agentes (guardias esqueléticos).
+
+Una vez en el interior, el patio del castillo está compuesto por casas y un torreón. Distribuimos las casas de tal manera que facilitaran el movimiento de los agentes y fueran de utilidad al ladrón para esconderse de los agentes interiores (patrulleros esqueléticos). En el interior también encontramos un cofre que el ladrón deberá robar antes de conseguir escapar.
+
+Una decisión fundamental es el espacio de movimiento de cada agente. Los agentes ubicados en la puerta principal (guardias) no pueden entrar dentro del castillo, simplemente tratan de impedirnos entrar y dificultarnos escapar. Por otro lado, los agentes de dentro del castillo (patrulleros) no pueden salir del castillo, simplemente perseguirnos dentro de él.
+
+Los agentes (ni el ladrón) no tienen la capacidad de entrar en las casas, ni pueden escalar o acceder a zonas elevadas como los puentes, las torres o encima de las murallas.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{MapaSMACenital.png}
+    \caption{Vista cenital del mundo virtual.}
+    \label{fig:mapa_cenital}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{MapaSMACastillo.png}
+    \caption{Vista Castillo.}
+    \label{fig:mapa_cenital}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{MapaSMAEntrada.png}
+    \caption{Entrada al Castillo.}
+    \label{fig:mapa_cenital}
+\end{figure}
+
+
+% ARQUITECTURA INDIVIDUAL
+\section{Arquitectura individual}
+
+Los agentes del sistema se han diseñado siguiendo una arquitectura híbrida en capas inspirada en el modelo TouringMachines. Esta elección se justifica por la necesidad de combinar respuestas inmediatas ante estímulos del entorno con comportamientos que requieren planificación. El entorno del proyecto es dinámico y exige tanto reactividad (persecución, combate) como proactividad (patrulla), lo que descarta enfoques puramente deliberativos o puramente reactivos.
+
+La arquitectura se organiza en dos capas de decisión y dos subsistemas funcionales diferenciados.
+
+\subsection*{Capas de decisión}
+
+El sistema incorpora una capa reactiva y una capa deliberativa, ambas capaces de generar propuestas de acción de forma independiente en cada ciclo de actualización.
+
+La \textbf{capa reactiva} tiene prioridad sobre la otra y se activa ante estímulos inmediatos del entorno, como la detección del ladrón. Cuando se activa, genera comportamientos de persecución y, si se cumplen las condiciones (estar a una distancia definida), propone el inicio del ataque.
+
+El papel de la \textbf{capa deliberativa} es permitir que el patrullero tenga un proceso de planificación de ruta mediante el escaneo de múltiples direcciones y la selección del trayecto recto más largo posible. En el caso del guardián, genera un comportamiento de vigilancia mediante rotación (aunque es un movimiento cíclico simple, lo añadimos aquí por respetar la estructura).
+
+Ambas capas no ejecutan directamente las acciones, sino que generan una propuesta estructurada que es evaluada por el sistema de control.
+
+\subsection*{Subsistema de control}
+
+El \textbf{ControlSubsystem} es el mediador entre capas. En cada ciclo:
+
+\begin{itemize}
+    \item Solicita propuestas tanto a la capa reactiva como a la deliberativa.
+    \item Otorga prioridad jerárquica a la capa reactiva cuando esta lo solicita.
+    \item Envía la propuesta seleccionada al subsistema de acción para su ejecución.
+\end{itemize}
+
+Además, el sistema de control puede quedar temporalmente bloqueado cuando el agente se encuentra ejecutando un ataque.
+
+\subsection*{Subsistema de acción}
+
+El \textbf{AgentActuator} es el subsistema encargado de ejecutar las decisiones seleccionadas. Este módulo se encarga del movimiento, la rotación o el ataque, pero no decide nada.
+
+El ataque se implementa como un proceso temporal con animación, activación controlada de la hitbox y un periodo de cooldown. Durante su ejecución, el sistema de control suspende nuevas decisiones hasta que el proceso finaliza.
+
+\subsection*{Mecanismo de impacto y reinicio}
+
+El componente \textbf{SwordHitbox} gestiona la detección física del impacto de la espada del agente con el ladrón. Cuando la hitbox activa colisiona con el jugador, se registra el impacto y se reinicia la escena actual.
+
+
+% SENSORES
+\section{Sensores}
+
+El sistema incorpora sensores específicos que permiten a los agentes percibir el entorno y obtener la información necesaria para la toma de decisiones. Estos sensores no ejecutan acciones ni contienen lógica de control, sino que proporcionan datos estructurados a las capas de decisión.
+
+\subsection*{VisionSensor}
+
+El \textbf{VisionSensor} implementa la percepción visual del agente. Simula un campo de visión mediante tres restricciones principales:
+
+\begin{itemize}
+    \item Distancia máxima de detección.
+    \item Ángulo de visión.
+    \item Comprobación de línea de visión mediante \textit{raycast}.
+\end{itemize}
+
+El sensor determina si el ladrón es visible teniendo en cuenta posibles obstáculos. Además, este sensor incluye una función utilizada por el patrullador para evaluar trayectorias posibles durante la planificación de ruta.
+
+\subsection*{MovementSensor}
+
+El \textbf{MovementSensor} proporciona información sobre el estado físico del agente en el entorno. Sus funciones principales son:
+
+\begin{itemize}
+    \item Determinar si el agente ha alcanzado su destino dentro del sistema de navegación.
+    \item Comprobar la distancia real respecto a un objetivo.
+    \item Proporcionar la posición actual del agente.
+\end{itemize}
+
+\subsection*{SwordHitbox como sensor de impacto}
+
+Aunque su activación depende del subsistema de acción, el componente \textbf{SwordHitbox} cumple una función sensorial en el momento del impacto. Detecta colisiones físicas mediante un \textit{collider} y, si el objeto impactado corresponde al jugador, registra el evento y desencadena el reinicio de la escena.
+
+
+% ACTUADORES
+\section{Actuadores}
+
+Los actuadores del sistema son los componentes responsables de ejecutar las decisiones generadas por las capas de control. A diferencia de los sensores, no interpretan información.
+
+\subsection*{Movimiento mediante NavMeshAgent}
+
+El principal actuador de desplazamiento es el componente \textbf{NavMeshAgent}. Este permite:
+
+\begin{itemize}
+    \item Desplazamiento autónomo hacia un destino determinado.
+    \item Ajuste dinámico de velocidad y aceleración.
+    \item Definición de una distancia de parada.
+\end{itemize}
+
+Garantiza navegación coherente dentro del entorno definido por el NavMesh, evitando colisiones con obstáculos y respetando las zonas transitables. Este actuador es utilizado tanto en la patrulla deliberativa como en la persecución reactiva.
+
+\subsection*{Rotación y orientación}
+
+El sistema incorpora un actuador de rotación que permite:
+
+\begin{itemize}
+    \item Rotar en el lugar una cantidad concreta de grados.
+    \item Orientar el agente hacia una posición objetivo.
+\end{itemize}
+
+Este mecanismo es fundamental para el comportamiento de vigilancia del guardián y para asegurar que el agente mire hacia el objetivo antes de ejecutar un ataque.
+
+\subsection*{Sistema de animación}
+
+El componente \textbf{Animator} actúa como actuador visual, sincronizando el estado lógico del agente con animaciones de golpear, correr,...
+
+\subsection*{Sistema de ataque y activación de hitbox}
+
+El ataque se implementa como un actuador compuesto que combina:
+
+\begin{itemize}
+    \item Activación de la animación de ataque.
+    \item Activación temporal del collider de la espada.
+    \item Desactivación automática tras una ventana de impacto.
+    \item Periodo de enfriamiento (cooldown).
+\end{itemize}
+
+Este diseño garantiza que el ataque tenga una duración limitada y que no pueda repetirse de manera continua sin restricción temporal. La activación controlada de la hitbox permite que el impacto solo sea posible durante un intervalo concreto.
+
+\end{document}
