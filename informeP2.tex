@@ -1,0 +1,369 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{titlesec}
+\usepackage{subcaption}
+
+% Formato de secciones principales
+\titleformat{\section}
+  {\normalfont\Large\bfseries}
+  {}
+  {0pt}
+  {}
+
+\titlespacing*{\section}
+  {0pt}{1.5em}{0.8em}
+
+\begin{document}
+
+\title{\vspace{60pt}\begingroup
+    \centering
+    \includegraphics[width=0.6\textwidth]{udc (1).png}\\[2em]
+    \large Grado en Intelixencia Artificial\\[0.5em]
+    \large Sistemas Multiagente\\[2em]
+    \large \textbf{Práctica 2: Comunicación y comportamiento social}\par
+\endgroup}
+\author{Miguel Baños Baladrón \\ Fiz Garrido Escudero \\ Grupo Martes}
+
+\date{3 de Mayo de 2026}
+\maketitle
+\newpage
+
+\tableofcontents
+\newpage
+
+
+% MUNDO VIRTUAL
+\section{Mundo Virtual}
+
+El mundo virtual mantiene la estructura general de la Práctica 1: un exterior abierto rodeando un castillo central, con guardias estáticos en la puerta y patrulleros en el interior, un cofre que el ladrón debe robar y una zona de salida por la que escapar.
+
+Las novedades del escenario son:
+
+\begin{itemize}
+    \item \textbf{Rejas dinámicas}: obstáculos cíclicos que emergen del suelo durante un tiempo y luego se retraen. Mientras están elevadas, tallan el NavMesh con un \texttt{NavMeshObstacle}, bloqueando temporalmente rutas que antes eran transitables. Esto obliga a los patrulleros a replantear sus rutas en tiempo de ejecución.
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.6\textwidth]{valla.png}
+        \caption{Reja dinámica emergiendo del suelo.}
+    \end{figure}
+
+    \item \textbf{Cámaras de vigilancia}: nuevos agentes estáticos colocados en puntos estratégicos del castillo que sólo perciben (no se mueven ni atacan) y coordinan a los patrulleros para investigar avistamientos.
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=0.6\textwidth]{camara.png}
+        \caption{Cámara de vigilancia colocada en el castillo.}
+    \end{figure}
+
+    \item \textbf{Puntos de entrada} para los guardias estáticos: GameObjects vacíos colocados dentro del NavMesh cerca de la puerta, asignados en el Inspector. Sirven como referencia geográfica accesible cuando el guardián exterior debe pedir ayuda al interior (la posición real del ladrón puede estar fuera del NavMesh de los patrulleros).
+\end{itemize}
+
+El resto del escenario (terreno, vegetación, distribución de casas y torreón, restricciones de movimiento por tipo de agente) se mantiene exactamente igual que en la Práctica 1.
+
+\subsection*{Agentes del mundo}
+
+El sistema cuenta con tres tipos de agente comunicante, además del ladrón controlado por el jugador.
+
+\paragraph{Patrullero}
+Es el agente más completo. Dispone de las cinco partes de la arquitectura: sensores (visión, escucha, movimiento, hitbox), reactiva, deliberativa, social y actuador. Su interacción con el entorno es doble: percibe al ladrón mediante visión y escucha, y detecta cambios en el estado del cofre y las rejas dinámicas. Puede ser tanto Iniciador como Participante en cualquier protocolo: comprobaciones periódicas del cofre (por timer), investigación de avistamientos comunicados por una cámara, respuesta a alertas de un guardián estático, bloqueo de la zona de salida tras detectar el robo y búsqueda coordinada tras perder al ladrón.
+
+\paragraph{Guardián}
+Vigila la entrada del castillo. No puede moverse al interior y por ello siempre responde \texttt{REFUSE} a cualquier REQUEST que reciba. Sí puede ser Iniciador en una situación:
+\begin{itemize}
+    \item \textbf{Por avistamiento}: si detecta al ladrón con su \texttt{VisionSensor}, lanza la tarea \texttt{ladronAvistado} con la posición de su \texttt{puntoEntrada} (un GameObject vacío dentro del NavMesh) como referencia, para que un patrullero acuda a esa zona.
+\end{itemize}
+
+\paragraph{Cámara}
+Agente exclusivamente perceptivo y comunicativo. No tiene capa reactiva, ni \texttt{NavMeshAgent}, ni \texttt{HearingSensor}, ni \texttt{NoiseEmitter}. Su único sensor es el \texttt{CameraSensor}, una versión simplificada del \texttt{VisionSensor} que sólo detecta al ladrón (sin lógica de cofre, ni reescaneo de entorno). Cuando lo detecta, su deliberativa activa el flag \texttt{protocoloActivo} y lanza un Contract Net con tarea \texttt{investigarAvistamiento}. Como nunca puede ser Participante, su \texttt{CameraSocialLayer} sólo implementa el vocabulario del Iniciador.
+
+
+% ARQUITECTURA INDIVIDUAL
+\section{Arquitectura individual}
+
+Se conserva la arquitectura híbrida en capas inspirada en TouringMachines de la Práctica 1, pero ampliada con una nueva capa \textbf{Social} que se sitúa por encima de las capas reactiva y deliberativa. La regla de inhibición sigue intacta: la capa reactiva siempre tiene prioridad si solicita el control.
+
+El flujo de datos completo queda:
+
+    \begin{figure}[H]
+        \centering
+        \includegraphics[width=1.0\textwidth]{arquitectura_agente.png}
+    \end{figure}
+
+Las capas reactiva y deliberativa nunca manipulan mensajes ACL. La deliberativa habla con la capa social mediante eventos y llamadas a métodos del lenguaje del juego (Ej: ``enviar REQUEST con tarea X'', ``he recibido una propuesta del agente Y con coste Z''). La capa social es la única que conoce el formato y el vocabulario de la comunicación.
+
+Esta separación permite que cámaras y esqueletos compartan exactamente la misma infraestructura de mensajería sin compartir reactiva ni capa de movimiento.
+
+Se han corregido también varios errores y limitaciones de la Práctica 1:
+
+\begin{itemize}
+    \item \textbf{Cesión del control:} la capa reactiva del patrullero ya no
+    monopoliza el control durante la patrulla. \texttt{PatrolBehaviour} devuelve \texttt{null}
+    mientras el \texttt{NavMeshAgent} se desplaza por inercia, cediendo el control a la
+    deliberativa para que gestione el protocolo Contract Net. En consecuencia, el árbitro
+    (\texttt{ControlSubsystem}) también se ha corregido para tolerar propuestas \texttt{null}
+    de cualquiera de las dos capas.
+
+    \item \textbf{Modelo de percepción basado en eventos:} en la Práctica 1 las capas
+    consultaban activamente a los sensores cada frame (modelo \textit{pull}). Ahora son los
+    sensores quienes notifican a los behaviours mediante eventos C\# cuando detectan un cambio
+    relevante: el ladrón es visto o perdido, se escucha un ruido, el agente llega a su destino,
+    el cofre desaparece, etc. Los behaviours se suscriben en \texttt{Initialize()} y mantienen
+    su propio estado interno. Esto elimina el acoplamiento directo entre capas y sensores, y
+    garantiza que ninguna información se pierde entre frames.
+\end{itemize}
+
+\subsection*{Capa Reactiva}
+
+Igual que en la Práctica 1, la capa reactiva consulta a una cadena priorizada de \textit{behaviours} y devuelve la primera propuesta no nula. La novedad es que ahora puede devolver \texttt{null} legítimamente (entre puntos de patrulla, mientras el NavMeshAgent se desplaza por inercia), cediendo así el control a la deliberativa.
+
+Existen dos especializaciones:
+
+\begin{itemize}
+    \item \texttt{PatrolReactiveLayer}: cadena \textit{Attack > Chase > Investigate > FollowGuard > Patrol}.
+    \item \texttt{GuardianReactiveLayer}: cadena \textit{Attack > Chase > Investigate > FollowGuard > Watch}.
+\end{itemize}
+
+La cámara \textbf{no tiene capa reactiva}: la capa reactiva existe para elegir entre
+behaviours de movimiento y ataque según los estímulos del momento (perseguir, atacar,
+investigar...). La cámara no se mueve ni ataca, así que no tiene ningún behaviour que
+ejecutar. Si tuviera capa reactiva, simplemente devolvería \texttt{null} cada frame sin
+hacer nada útil. Cuando el sensor detecta al ladrón, la única respuesta posible es
+coordinar a otros agentes mediante el protocolo Contract Net, que es responsabilidad de
+la capa deliberativa. Por eso el evento del sensor va directamente a la deliberativa,
+eliminando una capa que no aportaría nada.
+
+\subsection*{Capa Deliberativa}
+
+La capa deliberativa implementa la \textbf{máquina de estados (FSM)} del protocolo Contract Net. Cada tipo de agente tiene su propia FSM:
+
+\begin{itemize}
+    \item \texttt{PatrolDeliberativeLayer} actúa como \textbf{Iniciador y Participante}. Sus
+    estados son: \texttt{IDLE} (sin conversación activa, esperando el timer o un evento),
+    \texttt{INIT\_WAIT\_RESPONSES} (REQUEST enviado, esperando AGREE/REFUSE de los demás agentes),
+    \texttt{INIT\_WAIT\_PROPOSALS} (CFP enviado a los voluntarios, esperando sus PROPOSEs),
+    \texttt{INIT\_WAIT\_RESULT} (ganador aceptado, esperando su INFORM\_RESULT),
+    \texttt{PART\_VOLUNTEERED} (ha respondido AGREE, esperando el CFP del iniciador),
+    \texttt{PART\_PROPOSED} (ha enviado su propuesta, esperando ACCEPT o REJECT\_PROPOSAL)
+    y \texttt{PART\_EXECUTING} (ha ganado el contrato y está ejecutando el behaviour comprometido).
+    Maneja las tareas \texttt{comprobarCofre}, \texttt{investigarAvistamiento},
+    \texttt{ladronAvistado}, \texttt{bloquearSalida} y busquedaCoordinada.
+
+    \item \texttt{GuardianDeliberativeLayer} actúa sólo como \textbf{Iniciador}, con los mismos
+    estados \texttt{IDLE}, \texttt{INIT\_WAIT\_RESPONSES}, \texttt{INIT\_WAIT\_PROPOSALS} e
+    \texttt{INIT\_WAIT\_RESULT}. Como participante siempre responde \texttt{REFUSE} (no puede
+    moverse al interior del castillo). Lanza protocolos de tarea
+    \texttt{ladronAvistado}.
+
+    \item \texttt{CameraDeliberativeLayer} actúa sólo como \textbf{Iniciador}. No hereda de
+    \texttt{DeliberativeLayer} porque la cámara nunca propone movimiento al
+    \texttt{ControlSubsystem}. Sus estados son equivalentes a los del iniciador del patrullero
+    pero con nombres simplificados: \texttt{IDLE}, \texttt{WAIT\_RESPONSES},
+    \texttt{WAIT\_PROPOSALS} y \texttt{WAIT\_RESULT}.
+\end{itemize}
+
+Cuando la deliberativa está en estado \texttt{PART\_EXECUTING} (el agente ha ganado el
+contrato y está cumpliendo su compromiso) su método
+\texttt{GenerarPropuesta()} devuelve un \texttt{ActionProposal} delegando en el behaviour comprometido (\texttt{CheckChestBehaviour} o \texttt{GoToPositionBehaviour}). En cualquier otro estado devuelve \texttt{null}.
+
+\subsection*{Capa Social}
+
+La capa social es completamente nueva en esta práctica. Se compone de tres elementos:
+
+\paragraph{\texttt{AgenteFIPAACL}} Clase abstracta de la que heredan todas las capas sociales. Aporta:
+\begin{itemize}
+    \item Registro estático \texttt{Todos} con todas las instancias activas en escena, actualizado en \texttt{OnEnable}/\texttt{OnDisable}.
+    \item \texttt{Inbox} (cola de mensajes) drenado en \texttt{Update} con un límite \texttt{mensajesPorFrame} configurable (por defecto 2) para evitar congelar el juego ante avalanchas de mensajes.
+    \item Envío únicamente \textbf{unicast}: cualquier multicast se hace por bucle explícito desde la capa social.
+    \item Factoría \texttt{CrearMensaje} que rellena \texttt{sender} y genera un GUID para \texttt{conversationId}.
+    \item Hook abstracto \texttt{ProcesarMensaje(ACLMessage)} que cada subclase implementa con su vocabulario.
+    \item Historial de mensajes requerido por el enunciado de la práctica.
+\end{itemize}
+
+\paragraph{\texttt{SkeletonSocialLayer}} Hereda de \texttt{AgenteFIPAACL} y define el lenguaje completo del protocolo Contract Net, las estructuras de datos del mensaje, la API de métodos que llama la deliberativa (\texttt{EnviarRequest}, \texttt{EnviarCFP}, \texttt{EnviarPropuesta}, \texttt{InformarResultado}, \texttt{BroadcastInform}, etc.) y los eventos que la deliberativa escucha (\texttt{OnRequestReceived}, \texttt{OnCFPReceived}, \texttt{OnProposalReceived}, etc.). También gestiona el \textbf{timer aleatorio coordinado}: cada agente sortea un valor en \texttt{[timerMin, timerMax]}, se pausa al entrar en una conversación (\texttt{TIMER\_MAX}) y se reinicia al cierre, sincronizando emergentemente quién intenta iniciar a continuación (usado en la tarea de revisar el cofre). Los mensajes con performative desconocido o \texttt{content} de tipo incorrecto generan automáticamente un \texttt{NOT\_UNDERSTOOD} al emisor.
+
+\paragraph{\texttt{CameraSocialLayer}} Hereda de \texttt{AgenteFIPAACL} e implementa únicamente el vocabulario necesario para el rol de Iniciador: \texttt{REQUEST}, \texttt{CFP}, \texttt{ACCEPT\_PROPOSAL}, \texttt{REJECT\_PROPOSAL} y \texttt{REFUSE}. Utiliza las mismas estructuras de datos que \texttt{SkeletonSocialLayer} para que los guardias puedan interpretar correctamente los mensajes recibidos de la cámara — si la cámara definiera estructuras propias con campos idénticos, los guardias no las reconocerían al ser tipos distintos en tiempo de ejecución.
+
+\subsection*{Sensores}
+
+\paragraph{VisionSensor}
+Heredado de la Práctica 1 con varias mejoras. Detecta al ladrón mediante distancia, ángulo y \textit{raycast} de línea de visión. Las novedades son:
+
+\begin{itemize}
+    \item \textbf{Escaneo del entorno} en 16 direcciones, usado por \texttt{PatrolBehaviour} para planificar rutas.
+    \item \textbf{Detección de cambios en rejas dinámicas}: cada frame consulta la lista estática \texttt{DynamicBars.todas} y, si una reja visible cambia de estado, relanza \texttt{EscanearEntorno()} para que el patrullero replantee su ruta.
+    \item \textbf{Comprobación del cofre}: cuando \texttt{GameManager.hasLoot == true} y el cofre está dentro del cono de visión, dispara \texttt{OnCofresDesaparecido} una sola vez. Esto se usa ahora en el patrullero para lanzar el protocolo \texttt{bloquearSalida}.
+    \item \textbf{Método público \texttt{ComprobarEstadoCofre()}} que devuelve \texttt{true} si el cofre sigue intacto, usado por \texttt{CheckChestBehaviour} respetando la arquitectura TM.
+    \item \textbf{Robustez}: null-checks en \texttt{eyePoint}, \texttt{cofre} y \texttt{MovementSensor} para que pueda usarse en agentes que no tengan todos esos componentes.
+    \item Re-escaneo automático al llegar a destino mediante suscripción \texttt{MovementSensor.\allowbreak OnDestinoAlcanzado}.
+\end{itemize}
+
+\paragraph{HearingSensor}
+Sensor nuevo en la práctica 2. Detecta emisores de ruido (\texttt{NoiseEmitter}) en un radio configurable, distingue al ladrón (tag \texttt{Ladron}) de otros guardias (tag \texttt{Esqueleto}) y aplica una imprecisión configurable a la posición percibida. Dispara \texttt{OnLadronEscuchado}, \texttt{OnEsqueletoEscuchado} y sus correspondientes eventos de pérdida.
+
+\paragraph{MovementSensor}
+Sin cambios. Monitoriza el \texttt{NavMeshAgent} y dispara \texttt{OnDestinoAlcanzado} cuando el agente llega a su destino con una tolerancia de 0.3 unidades. Es el evento clave que cierra los behaviours \texttt{CheckChestBehaviour} y \texttt{GoToPositionBehaviour}.
+
+\paragraph{SwordHitBox}
+Sin cambios. Sigue actuando como sensor de impacto y reiniciando la escena al colisionar con el ladrón.
+
+\paragraph{CameraSensor}
+Nuevo en esta práctica. Implementación reducida al mínimo: detecta al ladrón con los tres mismos criterios (distancia, ángulo, raycast) y dispara \texttt{OnLadronAvistado} y \texttt{OnLadronPerdido} en los flancos de cambio de estado. Expone \texttt{PosicionLadron} como propiedad pública. El gizmo dibuja el cono 3D real usando \texttt{transform.right} y \texttt{transform.up} para reflejar la orientación de la cámara. No incluye lógica de cofre, rejas ni escaneo de entorno, ya que la cámara no las necesita.
+
+\subsection*{Behaviours}
+
+Los behaviours siguen siendo clases C\# que implementan la interfaz \texttt{IBehaviour} con un método \texttt{Evaluate() : ActionProposal?}. Se distinguen dos categorías según quién los activa.
+
+\paragraph{Behaviours reactivos}
+Son los que viven en la cadena priorizada de la capa reactiva y responden directamente a estímulos sensoriales.
+
+\begin{itemize}
+    \item \texttt{AttackBehaviour}: ladrón visible y a distancia de ataque.
+    \item \texttt{ChaseBehaviour}: ladrón visible pero fuera de alcance.
+    \item \texttt{InvestigateBehaviour}: ladrón escuchado pero no visto, va a la posición del ruido a velocidad de caminar.
+    \item \texttt{FollowGuardBehaviour}: otro guardia ha sido escuchado corriendo y no hay información directa del ladrón.
+    \item \texttt{PatrolBehaviour}: \textit{fallback} del patrullero. Modificado en esta práctica para devolver \texttt{null} mientras el NavMeshAgent ya tiene un destino activo, cediendo así el control a la deliberativa mientras patrulla. Sólo devuelve un \texttt{ActionProposal} al recalcular un nuevo destino (al llegar al anterior o al detectar un cambio de entorno). Además expone el campo \texttt{velocidadAlerta} (3 m/s por defecto) y el método \texttt{ActivarModoAlerta()} para que la deliberativa pueda subir la velocidad de patrulla cuando se confirma el robo del cofre.
+    \item \texttt{WatchBehaviour}: \textit{fallback} del guardián estático, oscila la mirada $\pm$\texttt{watchAngle}º.
+\end{itemize}
+
+\paragraph{Behaviours activados por la deliberativa}
+Una segunda familia de behaviours no participa en la cadena reactiva. Los activa explícitamente la capa deliberativa al ganar un contrato y representan el \textbf{compromiso} adquirido.
+
+\begin{itemize}
+    \item \texttt{CheckChestBehaviour}: activado al ganar el contrato \texttt{comprobarCofre}. Mueve al guardia hasta una distancia de parada del cofre. Al llegar consulta \texttt{VisionSensor.\allowbreak ComprobarEstadoCofre()} y dispara el evento \texttt{OnComprobacionCompletada(bool cofreIntacto)}.
+    \item \texttt{GoToPositionBehaviour}: behaviour genérico que desplaza al agente a un \texttt{Vector3} arbitrario en lugar de a un \texttt{Transform} fijo. Dispara \texttt{OnLlegadaCompletada}. Es compartido por cuatro tareas distintas: \texttt{investigarAvistamiento} (cámara), \texttt{ladronAvistado} (guardián exterior), \texttt{bloquearSalida} (patrullero que ha visto el cofre vacío) y \texttt{busquedaCoordinada} para llevar a cada patrullero a su sector.
+\end{itemize}
+
+\subsection*{Árbitro y actuador}
+
+\paragraph{ControlSubsystem}
+Sigue siendo el árbitro entre las dos capas de decisión. La única modificación respecto a la Práctica 1 es que ahora tolera propuestas \texttt{null} en cualquiera de las dos capas, requisito imprescindible para que el patrullero pueda ceder el control a la deliberativa mientras patrulla. La regla de inhibición para la reactiva se mantiene.
+
+\paragraph{AgentActuator}
+Sin cambios respecto a la Práctica 1. Sigue siendo el componente que ejecuta las decisiones (\texttt{MoverA}, \texttt{Rotar}, \texttt{IniciarAtaque}) sobre el \texttt{NavMeshAgent} y el \texttt{Animator}, sin tomar decisiones propias. Mantiene el cooldown de ataque y la suspensión del control durante la animación.
+
+\subsection*{Movimiento del ladrón}
+
+El ladrón sigue siendo el único agente del juego que no usa \texttt{NavMeshAgent}: se controla mediante un \texttt{CharacterController} con entrada WASD desde el sistema \texttt{InputSystem\_Actions}. Esta separación es deliberada — el ladrón es controlado por el jugador, no es un agente autónomo del SMA — y se mantiene exactamente igual que en la Práctica 1.
+
+El ladrón comparte con los guardias el componente \texttt{NoiseEmitter}, que emite un radio de ruido proporcional a su velocidad (radio de andar 2 m, radio de correr 3 m a partir de 3.5 m/s). Este componente es el puente entre el sistema de movimiento y la percepción auditiva de los guardias mediante \texttt{HearingSensor}.
+
+
+% COMUNICACIÓN ENTRE AGENTES
+\section{Comunicación entre agentes}
+
+El sistema implementa el protocolo \textbf{FIPA Contract Net}. Una conversación atraviesa tres fases:
+
+\paragraph{Fase 0 — Reclutamiento} El Iniciador envía un \texttt{REQUEST} con la tarea a todos los agentes registrados. Cada destinatario responde \texttt{AGREE} o \texttt{REFUSE} antes del \texttt{replyBy}. El guardián siempre responde \texttt{REFUSE} a cualquier REQUEST porque no puede moverse al interior. El Iniciador construye la lista de voluntarios.
+
+\paragraph{Fase 1 — Negociación} El Iniciador envía un \texttt{CFP} con la posición de referencia a todos los voluntarios. Cada voluntario calcula su coste como distancia euclídea a esa posición y envía un \texttt{PROPOSE}. El Iniciador selecciona la propuesta de menor coste y envía \texttt{ACCEPT\_PROPOSAL} al ganador y \texttt{REJECT\_PROPOSAL} a los perdedores.
+
+\paragraph{Fase 2 — Ejecución y cierre} El ganador entra en estado \texttt{PART\_EXECUTING}, ejecuta el behaviour comprometido y al terminar envía \texttt{INFORM\_RESULT} sólo al Iniciador. Para difundir el resultado al resto, el ganador hace un \texttt{INFORM} (fuera del Contract Net) a todos los agentes interesados. Cada receptor reinicia su timer al recibir cualquiera de los dos mensajes.
+
+\paragraph{Excepciones y errores}
+
+\begin{itemize}
+    \item \texttt{NOT\_UNDERSTOOD}: lo gestiona automáticamente la capa social y la deliberativa nunca lo ve.
+    \item \texttt{FAILURE}: se trata como un \texttt{INFORM\_RESULT} con \texttt{exito=false}.
+    \item \texttt{CANCEL}: un Participante en \texttt{PART\_EXECUTING} aborta y vuelve a patrullar.
+    \item Timeouts de fase (\texttt{timeoutFase}): cierran la conversación si no se reciben todas las respuestas a tiempo.
+    \item \texttt{INFORM} de búsqueda coordinada: cuando un patrullero pierde al ladrón, en lugar de usar Contract Net emite directamente un \texttt{INFORM} a todos los patrulleros con la última posición conocida. No hay negociación ni ganador único: todos los receptores (incluido el emisor, porque puede ser él el que está más cerca) calculan autónomamente su sector de búsqueda y se dirigen a él. Este uso del \texttt{INFORM} fuera del flujo Contract Net es deliberado: la coordinación emerge de las posiciones relativas sin necesidad de propuestas.
+\end{itemize}
+
+Los mensajes se crean, envían y reciben a través de \texttt{AgenteFIPAACL}: la factoría \texttt{CrearMensaje} construye el \texttt{ACLMessage} con \texttt{sender} ya relleno y un GUID como \texttt{conversationId}. El envío es siempre \textbf{unicast} — el mensaje se deposita directamente en la cola \texttt{inbox} del destinatario. El multicast se realiza mediante bucles explícitos en la capa social. Cada agente drena su inbox en \texttt{Update} con un límite de \texttt{mensajesPorFrame} mensajes por frame, evitando congelar el juego ante avalanchas de mensajes.
+
+
+% FORMATO DEL CONTENIDO DE LOS LENGUAJES
+\section{Formato del contenido de los lenguajes}
+
+\subsection*{Estructura de ACLMessage}
+
+Cada mensaje es una instancia de \texttt{ACLMessage}, clase plana con los siguientes campos:
+
+\begin{itemize}
+    \item \texttt{performative} (\texttt{string}): acto comunicativo. Siempre se rellena.
+    \item \texttt{sender} (\texttt{string}): identificador del agente emisor, rellenado automáticamente por \texttt{CrearMensaje}.
+    \item \texttt{receivers} (\texttt{List<string>}): identificador del destinatario (unicast; en la práctica siempre contiene un elemento).
+    \item \texttt{content} (\texttt{object}): payload del mensaje. Su tipo real lo conoce sólo la capa social según el \texttt{performative}.
+    \item \texttt{conversationId} (\texttt{string}): GUID asignado por el Iniciador al abrir la conversación. Todos los mensajes de una misma negociación comparten este identificador.
+    \item \texttt{inReplyTo} (\texttt{string}): \texttt{conversationId} del mensaje al que responde, para encadenar turnos.
+    \item \texttt{replyBy} (\texttt{float}): tiempo absoluto de juego (\texttt{Time.time}) antes del cual se espera respuesta; usado para el deadline de CFP.
+\end{itemize}
+
+Se han omitido deliberadamente los campos \texttt{language}, \texttt{ontology} y \texttt{protocol} del estándar FIPA: el primero es redundante porque el \texttt{content} siempre es un struct C\# tipado conocido por el receptor según el \texttt{performative}; el segundo porque sólo existe un dominio semántico (el juego); el tercero también al usar solamente contractnet.
+
+\subsection*{Performatives}
+
+\texttt{SkeletonSocialLayer} define las siguientes constantes \texttt{string} que representan todos los actos comunicativos del protocolo:
+
+\begin{center}
+\texttt{REQUEST}, \texttt{AGREE}, \texttt{REFUSE}, \texttt{CFP}, \texttt{PROPOSE},\\
+\texttt{ACCEPT\_PROPOSAL}, \texttt{REJECT\_PROPOSAL}, \texttt{INFORM\_RESULT},\\
+\texttt{INFORM}, \texttt{FAILURE}, \texttt{NOT\_UNDERSTOOD}, \texttt{CANCEL}
+\end{center}
+
+\texttt{CameraSocialLayer} define únicamente los performatives necesarios para el rol de Iniciador (\texttt{REQUEST}, \texttt{CFP}, \texttt{ACCEPT\_PROPOSAL}, \texttt{REJECT\_PROPOSAL}, \texttt{REFUSE}), con los mismos valores de cadena para garantizar la interoperabilidad con los guardias.
+
+\subsection*{Estructuras de contenido}
+
+El campo \texttt{content} de los mensajes que llevan datos propios es un struct tipado. Los performatives sin datos propios (\texttt{AGREE}, \texttt{REFUSE}, \texttt{ACCEPT\_PROPOSAL}, \texttt{REJECT\_PROPOSAL}, \texttt{FAILURE}, \texttt{CANCEL}, \texttt{NOT\_UNDERSTOOD}) llevan \texttt{content = null}; el performative junto al \texttt{conversationId} es suficiente para identificar su significado.
+
+\begin{itemize}
+    \item \texttt{ContentRequest}: campo \texttt{string tarea}. Usado en \texttt{REQUEST}.
+    \item \texttt{ContentCFP}: campos \texttt{string tarea} y \texttt{Vector3 posicionReferencia}. Usado en \texttt{CFP}.
+    \item \texttt{ContentPropose}: campo \texttt{float coste}. Usado en \texttt{PROPOSE}.
+    \item \texttt{ContentInform}: campos \texttt{string tarea}, \texttt{bool exito} y \texttt{object datos}. Usado en \texttt{INFORM\_RESULT} e \texttt{INFORM}.
+    \item \texttt{ContentBusqueda}: campo \texttt{Vector3 ultimaPosicion}. Usado en el \texttt{INFORM} de búsqueda coordinada.
+\end{itemize}
+
+\subsection*{Procesamiento del contenido}
+
+Al recibir un mensaje, \texttt{ProcesarMensaje(ACLMessage)} en cada capa social aplica \textit{pattern matching} sobre el par \texttt{(performative, tipo de content)}. Si el performative es desconocido o el \texttt{content} no es del tipo esperado, la capa social genera automáticamente un \texttt{NOT\_UNDERSTOOD} al emisor sin notificar a la deliberativa. Los \texttt{NOT\_UNDERSTOOD} entrantes se ignoran silenciosamente para evitar bucles. Todo el vocabulario y la lógica de decodificación residen exclusivamente en la capa social; la deliberativa sólo recibe eventos en términos del dominio del juego (\texttt{OnRequestReceived}, \texttt{OnProposalReceived}, etc.) sin ver nunca un \texttt{ACLMessage}.
+
+
+% ESTRATEGIA MULTIAGENTE
+\section{Estrategia Multiagente}
+
+La estrategia cooperativa del sistema tiene un objetivo común: impedir que el ladrón escape con el botín. Para lograrlo, los agentes coordinan sus acciones mediante el protocolo Contract Net, con roles diferenciados y comportamientos emergentes que se adaptan al estado de la partida.
+
+\subsection*{Roles diferenciados}
+
+\begin{itemize}
+    \item \textbf{Cámara — Iniciador exclusivo}: detecta al ladrón y delega en los patrulleros la investigación. Nunca participa en contratos ajenos.
+    \item \textbf{Guardián — Iniciador exclusivo}: detecta al ladrón en el exterior y coordina a los patrulleros para cubrir el punto de entrada. Siempre rechaza participar en contratos porque no puede moverse al interior.
+    \item \textbf{Patrullero — Iniciador y Participante}: es el agente polivalente. Puede lanzar protocolos por timer (comprobación del cofre) o por percepción directa (bloqueo de salida, búsqueda coordinada), y también ejecutar tareas asignadas por otros agentes (investigar avistamiento, acudir al punto de entrada, bloquear la salida).
+\end{itemize}
+
+\subsection*{Mecanismos de coordinación}
+
+La coordinación se implementa mediante dos mecanismos complementarios:
+
+\begin{enumerate}
+    \item \textbf{Contract Net}: selección del agente más adecuado (menor coste = menor distancia) para ejecutar una tarea. Se usa cuando hay un ganador único: comprobarCofre, investigarAvistamiento, ladronAvistado, bloquearSalida.
+    \item \textbf{INFORM broadcast}: difusión de información sin negociación. Se usa cuando todos los agentes deben actuar: búsqueda coordinada tras perder al ladrón (cada uno va a su sector), activación del modo alerta al confirmar el robo del cofre.
+\end{enumerate}
+
+\subsection*{Comportamientos coordinados emergentes}
+
+\paragraph{Comprobación periódica del cofre} El timer coordinado de la capa social asegura que cada cierto tiempo aleatorio uno de los agentes lance un Contract Net con tarea \texttt{comprobarCofre}. El más cercano (menor coste) va al cofre. Si lo encuentra robado, hace un \texttt{INFORM} broadcast y todos los patrulleros activan permanentemente el \textbf{modo alerta} (subida de velocidad de patrulla mediante \texttt{ActivarModoAlerta()}).
+
+\paragraph{Investigación de avistamientos de cámara} Cuando una cámara ve al ladrón, lanza \texttt{investigarAvistamiento}. El patrullero más cercano se desplaza con \texttt{GoToPositionBehaviour}. Al llegar, el \texttt{MovementSensor.\allowbreak OnDestinoAlcanzado} dispara automáticamente \texttt{EscanearEntorno()} y \texttt{PatrolBehaviour} recalcula el destino desde la nueva posición, dejando al guardia patrullando indefinidamente la zona investigada sin necesidad de código adicional.
+
+\paragraph{Alerta desde guardia estático} Cuando un guardián exterior ve al ladrón, lanza \texttt{ladronAvistado} con la posición de su \texttt{puntoEntrada} (un Transform dentro del NavMesh). El patrullero más cercano se desplaza allí y queda patrullando esa zona, exactamente como en \texttt{investigarAvistamiento}.
+
+\paragraph{Bloqueo de la zona de salida} Al detectar el cofre robado por visión directa (\texttt{OnCofresDesaparecido}), un patrullero lanza \texttt{bloquearSalida} con la posición de la \texttt{ZonaSalida}. El más cercano va allí y queda patrullando la salida. Este efecto ocurre en paralelo al modo alerta: ambos coexisten porque uno surge del INFORM broadcast del Contract Net y el otro de la percepción directa.
+
+\paragraph{Búsqueda coordinada tras perder al ladrón} Cuando un patrullero pierde al ladrón, emite un \texttt{INFORM} con la última posición conocida. Todos los patrulleros (incluido el emisor) calculan su sector de forma autónoma: consultan \texttt{AgenteFIPAACL.Todos}, obtienen su índice entre los patrulleros y se les asigna el ángulo $\textit{índice} \times (360 / \textit{total})$. El destino se corrige con \texttt{NavMesh.SamplePosition} para garantizar que cae dentro del NavMesh. Aquí se usa deliberadamente un \texttt{INFORM} en lugar de un Contract Net porque no hay un ganador único: todos participan con un sector distinto y la dispersión emerge de las posiciones relativas sin propuestas.
+
+\subsection*{Decisiones globales adaptativas}
+
+El sistema adapta su comportamiento global en función del estado de la partida de forma emergente, sin un controlador centralizado:
+
+\begin{itemize}
+    \item \textbf{Antes del robo}: los agentes se coordinan periódicamente para verificar el estado del cofre y responden a avistamientos del ladrón de forma reactiva (guardián, cámara) o proactiva (timer).
+    \item \textbf{Tras el robo confirmado}: todos los patrulleros aumentan la velocidad de patrulla (modo alerta) y el más cercano a la salida se desplaza a bloquearla, incrementando la presión sobre el ladrón.
+    \item \textbf{Tras perder al ladrón}: en lugar de converger al mismo punto, los patrulleros se dispersan en sectores para cubrir la mayor área posible, maximizando la probabilidad de redetección.
+\end{itemize}
+
+\end{document}
