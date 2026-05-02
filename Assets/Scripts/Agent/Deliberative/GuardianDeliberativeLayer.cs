@@ -1,23 +1,19 @@
 // Capa Deliberativa del guardia estático.
 // Solo actúa como Iniciador del protocolo Contract Net — nunca como Participante,
 // ya que el guardián no puede moverse y no tiene sentido que ejecute tareas de desplazamiento.
-// Gestiona dos tareas:
-//   - "comprobarCofre": lanzada por timer aleatorio para verificar que el cofre sigue intacto.
+// Gestiona una única tarea:
 //   - "ladronAvistado": lanzada cuando el sensor detecta al ladrón, para que un patrullero investigue la entrada.
 using System.Collections.Generic;
 using UnityEngine;
 
 public class GuardianDeliberativeLayer : DeliberativeLayer
 {
-    [SerializeField] private Transform cofre;        // Referencia al cofre; necesaria para el CFP de comprobarCofre
-    [SerializeField] private Transform puntoEntrada; // Punto dentro del NavMesh cerca de la puerta; usado como destino en ladronAvistado
+    [SerializeField] private Transform puntoEntrada; // Punto dentro del NavMesh cerca de la puerta; usado como destino en el CFP
     public float timeoutFase = 3f;                   // Segundos máximos de espera por fase del protocolo
-    public string tareaCofre = "comprobarCofre";     // Identificador de la tarea de comprobación periódica
     private const string tareaLadron = "ladronAvistado"; // Identificador de la tarea de alerta de intrusión
 
     private SkeletonSocialLayer social;  // Capa social: traduce entre la FSM y los mensajes ACL
     private VisionSensor visionSensor;   // Sensor de visión: dispara OnLadronAvistado cuando ve al ladrón
-    private string tareaActual;          // Tarea en curso; determina qué posición usar en el CFP
 
     // Estados de la FSM del Iniciador:
     // IDLE → INIT_WAIT_RESPONSES → INIT_WAIT_PROPOSALS → INIT_WAIT_RESULT → IDLE
@@ -32,9 +28,6 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
     private Estado estado = Estado.IDLE;
     private string convIdActual;  // GUID compartido por todos los mensajes de la misma conversación
     private float deadlineFase;   // Tiempo absoluto (Time.time) en que expira la fase actual
-
-    // Flag que evita relanzar el Contract Net de comprobarCofre una vez confirmado el robo.
-    private bool cofreRobadoConfirmado;
 
     // Listas para acumular respuestas a lo largo del protocolo
     private List<AgenteFIPAACL> destinatariosRequest = new List<AgenteFIPAACL>();
@@ -55,7 +48,6 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
         if (visionSensor != null) visionSensor.OnLadronAvistado += OnLadronAvistado;
 
         // Suscripción a los eventos de la capa social
-        social.OnTimerExpired += OnTimerExpired;
         social.OnRequestReceived += OnRequestReceived;
         social.OnRequestResponseReceived += OnRequestResponseReceived;
         social.OnCFPReceived += OnCFPReceived;
@@ -74,17 +66,14 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
         switch (estado)
         {
             case Estado.INIT_WAIT_RESPONSES:
-                // Deadline de REQUEST: procesamos las respuestas recibidas hasta ahora
                 FinDeRecogidaDeRespuestas();
                 break;
             case Estado.INIT_WAIT_PROPOSALS:
-                // Deadline de CFP: procesamos las propuestas recibidas hasta ahora
                 FinDeRecogidaDePropuestas();
                 break;
             case Estado.INIT_WAIT_RESULT:
-                // El ganador no respondió a tiempo: cerramos la conversación y reiniciamos timer
+                // El ganador no respondió a tiempo: cerramos la conversación
                 FinalizarConversacionIniciador();
-                social.ReiniciarTimer();
                 break;
         }
     }
@@ -105,28 +94,22 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
             return;
         }
         Debug.Log($"[{name}] Ladrón avistado — iniciando ContractNet '{tareaLadron}'.");
-        LanzarProtocolo(tareaLadron);
+        LanzarProtocolo();
     }
 
-    // Centraliza el lanzamiento de cualquier protocolo Contract Net como Iniciador.
-    // Recoge todos los esqueletos del registro global, envía REQUEST y espera respuestas.
-    private void LanzarProtocolo(string tarea)
+    // Envía REQUEST a todos los patrulleros registrados y pasa a INIT_WAIT_RESPONSES.
+    private void LanzarProtocolo()
     {
         destinatariosRequest.Clear();
         foreach (AgenteFIPAACL a in AgenteFIPAACL.Todos)
         {
             if (a == social) continue;
-            if (a is SkeletonSocialLayer) destinatariosRequest.Add(a);
+            if (a.GetComponent<PatrolDeliberativeLayer>() != null) destinatariosRequest.Add(a);
         }
 
-        if (destinatariosRequest.Count == 0)
-        {
-            social.ReiniciarTimer();
-            return;
-        }
+        if (destinatariosRequest.Count == 0) return;
 
-        tareaActual = tarea;
-        convIdActual = social.EnviarRequest(tarea, destinatariosRequest);
+        convIdActual = social.EnviarRequest(tareaLadron, destinatariosRequest);
         voluntarios.Clear();
         respuestasEsperadas = destinatariosRequest.Count;
         respuestasRecibidas = 0;
@@ -134,18 +117,7 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
         estado = Estado.INIT_WAIT_RESPONSES;
     }
 
-    // Disparado por SkeletonSocialLayer cuando expira el timer aleatorio.
-    // Lanza el protocolo comprobarCofre si el cofre no ha sido robado previamente.
-    private void OnTimerExpired()
-    {
-        if (estado != Estado.IDLE) return;
-        if (cofre == null) return;
-        if (cofreRobadoConfirmado) return; // ya se sabe que el cofre fue robado, no tiene sentido comprobarlo
-
-        LanzarProtocolo(tareaCofre);
-    }
-
-    // Recibe cada AGREE o REFUSE al REQUEST. Acumula voluntarios y avanza cuando llegan todas las respuestas.
+    // Recibe cada AGREE o REFUSE. Acumula voluntarios y avanza cuando llegan todas las respuestas.
     private void OnRequestResponseReceived(string from, bool acepto, string convId)
     {
         if (estado != Estado.INIT_WAIT_RESPONSES || convId != convIdActual) return;
@@ -160,20 +132,17 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
         if (respuestasRecibidas >= respuestasEsperadas) FinDeRecogidaDeRespuestas();
     }
 
-    // Fase 1: envía CFP a los voluntarios.
-    // La posición de referencia depende de la tarea: puntoEntrada para ladronAvistado, cofre para comprobarCofre.
-    // Si nadie aceptó, cancela el protocolo y reinicia el timer.
+    // Fase 1: envía CFP a los voluntarios con puntoEntrada como posición de referencia.
+    // Si nadie aceptó, cancela el protocolo.
     private void FinDeRecogidaDeRespuestas()
     {
         if (voluntarios.Count == 0)
         {
             FinalizarConversacionIniciador();
-            social.ReiniciarTimer();
             return;
         }
 
-        Vector3 posicionCFP = (tareaActual == tareaLadron) ? puntoEntrada.position : cofre.position;
-        social.EnviarCFP(convIdActual, voluntarios, posicionCFP, tareaActual);
+        social.EnviarCFP(convIdActual, voluntarios, puntoEntrada.position, tareaLadron);
         proposalAgents.Clear();
         proposalCostes.Clear();
         propuestasEsperadas = voluntarios.Count;
@@ -182,7 +151,7 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
         estado = Estado.INIT_WAIT_PROPOSALS;
     }
 
-    // Recibe cada PROPOSE con el coste (distancia al punto de referencia) del candidato.
+    // Recibe cada PROPOSE con el coste (distancia al puntoEntrada) del candidato.
     private void OnProposalReceived(string from, float coste, string convId)
     {
         if (estado != Estado.INIT_WAIT_PROPOSALS || convId != convIdActual) return;
@@ -199,17 +168,14 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
     }
 
     // Selecciona al candidato con menor coste, le envía ACCEPT_PROPOSAL y rechaza al resto.
-    // Si no llegó ninguna propuesta, cancela el protocolo.
     private void FinDeRecogidaDePropuestas()
     {
         if (proposalCostes.Count == 0)
         {
             FinalizarConversacionIniciador();
-            social.ReiniciarTimer();
             return;
         }
 
-        // Selección del ganador: menor distancia al punto de referencia
         string ganadorId = null;
         float mejorCoste = float.MaxValue;
         foreach (KeyValuePair<string, float> kv in proposalCostes)
@@ -226,16 +192,15 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
         foreach (KeyValuePair<string, AgenteFIPAACL> kv in proposalAgents)
             if (kv.Key != ganadorId) social.RechazarPropuesta(convIdActual, kv.Value);
 
-        deadlineFase = Time.time + timeoutFase * 4f; // timeout generoso: el ganador debe desplazarse físicamente
+        deadlineFase = Time.time + timeoutFase * 4f;
         estado = Estado.INIT_WAIT_RESULT;
     }
 
-    // El ganador no pudo completar la tarea: cerramos la conversación y reiniciamos el timer.
+    // El ganador no pudo completar la tarea: cerramos la conversación.
     private void OnFailureReceived(string convId)
     {
         if (estado != Estado.INIT_WAIT_RESULT || convId != convIdActual) return;
         FinalizarConversacionIniciador();
-        social.ReiniciarTimer();
     }
 
     // -------------------- Como receptor de REQUEST/CFP de otro Iniciador --------------------
@@ -256,15 +221,11 @@ public class GuardianDeliberativeLayer : DeliberativeLayer
 
     // -------------------- Resultado de la conversación --------------------
 
-    // Recibe INFORM_RESULT del patrullero ganador cuando completa la tarea.
-    // Solo cierra la FSM: el ganador ya ha hecho el broadcast INFORM a todos los patrulleros.
+    // Recibe INFORM_RESULT del patrullero ganador cuando completa la tarea. Solo cierra la FSM.
     private void OnResultReceived(string from, bool exito, object datos, string convId)
     {
         if (estado == Estado.INIT_WAIT_RESULT && convId == convIdActual)
-        {
-            if (!exito) cofreRobadoConfirmado = true; // el cofre fue robado: no tiene sentido seguir comprobando
             FinalizarConversacionIniciador();
-        }
     }
 
     // El guardián no tiene estado de Participante, así que no hay nada que cancelar localmente.
