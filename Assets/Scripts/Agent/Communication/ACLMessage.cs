@@ -23,9 +23,6 @@ public class ACLMessage
     // conversationId del mensaje al que responde, para encadenar turnos.
     public string inReplyTo;
 
-    // Protocolo usado. Siempre "fipa-contract-net" en este proyecto.
-    public string protocol = "fipa-contract-net";
-
     // Tiempo absoluto de juego (Time.time) antes del cual se espera respuesta.
     public float replyBy;
 }
